@@ -1,0 +1,15 @@
+# SwiftPM 构建产物
+.build/
+build/
+
+# Windows 构建产物
+windows-receiver/bin/
+windows-receiver/obj/
+windows-receiver/publish/
+*.zip
+
+# macOS
+.DS_Store
+
+# 本地助手配置
+.claude/
