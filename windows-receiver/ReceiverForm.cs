@@ -54,6 +54,7 @@ public class ReceiverForm : Form
     private ReceiverConfig _config = new();
     private IntPtr _oldImc = IntPtr.Zero;
     private int _inputLatencyMs = -1;   // 输入回路延迟 EWMA（-1 = 未知）
+    private GpuVideoRenderer? _gpu;
 
     private static string ConfigDir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MacScreenExtender");
@@ -162,6 +163,7 @@ public class ReceiverForm : Form
         if (dec == null || dec.Width == 0 || _modeW == 0) return;
         string txt = $"已连接 视频{dec.Width}×{dec.Height} | 显示器{_modeW}×{_modeH}@{_modeHz}Hz";
         if (dec.Width != _modeW || dec.Height != _modeH) txt += " ⚠️不一致";
+        txt += _gpu != null && !dec.GpuFailed ? " | 渲染 GPU" : " | 渲染 CPU";
         var lat = Interlocked.CompareExchange(ref _inputLatencyMs, 0, 0);
         if (lat >= 0) txt += $" | 输入 ~{lat}ms";
         if (_status.Text != txt) _status.Text = txt;
@@ -250,8 +252,35 @@ public class ReceiverForm : Form
         if (!_started) return;
         _status.Text = "连接中 " + _url;
         _dec?.Dispose();
+        _dec = null;
+        _gpu?.Dispose(); _gpu = null;
+        try
+        {
+            _gpu = new GpuVideoRenderer(Log.Write);
+            if (_gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height)))
+            {
+                _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
+                Log.Write("GPU 渲染路径启用");
+            }
+            else
+            {
+                _gpu.Dispose(); _gpu = null;
+                Log.Write("GPU 初始化失败，使用 CPU 渲染路径");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"GPU 初始化异常: {ex.Message}");
+            _gpu?.Dispose(); _gpu = null;
+        }
+
         _dec = new VideoDecoder(_url);
         _dec.SetCursorSprite(_cursorSprite, CursorW, CursorH);
+        if (_gpu != null)
+        {
+            _dec.Renderer = _gpu;
+            _dec.CreateDecoderHwRef = _gpu.CreateDecoderHwRef;
+        }
         _dec.FrameReady = OnFrameReady;   // 帧到即画（合并排队），消灭轮询节拍差
         _dec.Start();
     }
@@ -259,6 +288,7 @@ public class ReceiverForm : Form
     private volatile bool _paintPending;
     private void OnFrameReady()
     {
+        if (_dec is { IsGpuRendering: true }) return;   // GPU 已在解码线程上屏
         if (_paintPending || !IsHandleCreated) return;
         _paintPending = true;
         try { BeginInvoke(new Action(() => { _paintPending = false; PaintTick(); })); }
@@ -296,6 +326,7 @@ public class ReceiverForm : Form
             if (wasWindowed && _status.Text != "已连接") _status.Text = "已连接";
         }
         if (dec.FrameCount == 0) return;
+        if (dec.IsGpuRendering) return;   // 画面已由 GPU 渲染器直出
         lock (dec.Sync)
         {
             if (dec.Bgra == IntPtr.Zero || dec.Width == 0) return;
@@ -469,6 +500,12 @@ public class ReceiverForm : Form
         else base.OnPaintBackground(e);
     }
 
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        _gpu?.RequestResize(Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height));
+    }
+
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == Keys.Escape)
@@ -610,6 +647,32 @@ public class ReceiverForm : Form
         _forwarder?.Dispose();
         _retryTimer?.Stop();
         _dec?.Dispose();
+        _gpu?.Dispose(); _gpu = null;
         base.OnFormClosed(e);
+    }
+}
+
+
+/// 极简滚动日志（远程迭代用：%APPDATA%\MacScreenExtender\receiver.log）
+internal static class Log
+{
+    private static readonly object _lock = new();
+    private static readonly string LogPath = Path.Combine(ConfigDirStatic, "receiver.log");
+
+    internal static string ConfigDirStatic =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MacScreenExtender");
+
+    public static void Write(string msg)
+    {
+        try
+        {
+            lock (_lock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+                if (File.Exists(LogPath) && new FileInfo(LogPath).Length > 512 * 1024) File.WriteAllText(LogPath, "");
+                File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss.fff} {msg}\r\n");
+            }
+        }
+        catch { }
     }
 }

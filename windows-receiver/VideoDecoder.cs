@@ -49,6 +49,15 @@ public sealed unsafe class VideoDecoder : IDisposable
     /// 每解出一帧回调（Form 端用于"帧到即画"，消除轮询抖动；Form 侧负责合并防洪水）
     public Action? FrameReady;
 
+    /// GPU 渲染器（非空且硬解帧时：解码线程直接 GPU 上屏，零内存拷贝）
+    public GpuVideoRenderer? Renderer;
+    /// 渲染器提供的 D3D11VA 设备引用工厂（解码纹理与渲染同设备的关键）
+    public Func<IntPtr>? CreateDecoderHwRef;
+    /// GPU 上屏连续失败（Form 据此切换状态显示；解码继续走 CPU 下载路径）
+    public volatile bool GpuFailed;
+    public bool IsGpuRendering => Renderer != null && !GpuFailed;
+    private int _gpuFailCount;
+
     /// 光标精灵（BGRA 直通 alpha），解码后每帧混入
     public void SetCursorSprite(byte[] bgra, int w, int h)
     {
@@ -135,9 +144,27 @@ public sealed unsafe class VideoDecoder : IDisposable
         // HEVC 软解约 2-3 倍重。启用 d3d11va 硬解后多线程只作后备
         _dec->thread_count = (par->codec_id == AVCodecID.AV_CODEC_ID_HEVC) ? 2 : 1;
 
-        // d3d11va 硬解：解码（熵解码+帧重建，占 CPU 大头）交给显卡，CPU 只剩色彩转换和上屏。
-        // 失败自动退回软解
-        if (!_hwDisabled && _hwDev == null)
+        // d3d11va 硬解：解码（熵解码+帧重建，占 CPU 大头）交给显卡。
+        // 优先用渲染器的设备（解码纹理与渲染同设备 → 帧可零拷贝上屏）；
+        // 不可用则自建设备（走 CPU 下载路径）；再失败退回软解
+        bool hwAttached = false;
+        if (!_hwDisabled)
+        {
+            IntPtr hwRefPtr = IntPtr.Zero;
+            if (CreateDecoderHwRef != null) hwRefPtr = CreateDecoderHwRef();
+            if (hwRefPtr != IntPtr.Zero)
+            {
+                _dec->hw_device_ctx = (AVBufferRef*)hwRefPtr;   // 解码器持有该引用
+                hwAttached = true;
+                _srcFormat = -1;
+                _consecSendErr = 0;
+            }
+            else
+            {
+                _hwDisabled = true;
+            }
+        }
+        if (!hwAttached && !_hwDisabled)
         {
             AVBufferRef* dev = null;
             if (ffmpeg.av_hwdevice_ctx_create(&dev, AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0) == 0)
@@ -148,12 +175,11 @@ public sealed unsafe class VideoDecoder : IDisposable
             {
                 _hwDisabled = true;
             }
-        }
-        bool hwAttached = false;
-        if (!_hwDisabled && _hwDev != null)
-        {
-            _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
-            hwAttached = true;
+            if (_hwDev != null)
+            {
+                _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
+                hwAttached = true;
+            }
         }
         _srcFormat = -1;
         _consecSendErr = 0;
@@ -192,7 +218,29 @@ public sealed unsafe class VideoDecoder : IDisposable
                     {
                         if (sendRet == 0) _consecSendErr = 0;
                         while (ffmpeg.avcodec_receive_frame(_dec, _frame) >= 0)
-                            ConvertAndStore(_frame);
+                        {
+                            if (Renderer != null && !GpuFailed &&
+                                _frame->format == (int)AVPixelFormat.AV_PIX_FMT_D3D11)
+                            {
+                                // GPU 直渲（解码线程执行；CPU 零拷贝）
+                                float cnx, cny; bool cvis;
+                                lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
+                                if (Renderer.RenderFrame(_frame, cnx, cny, cvis))
+                                {
+                                    lock (_sync) { _w = _frame->width; _h = _frame->height; }
+                                    _gpuFailCount = 0;
+                                    _frameCount++;
+                                    FrameReady?.Invoke();
+                                    continue;
+                                }
+                                if (++_gpuFailCount > 50) GpuFailed = true;   // 熔断回 CPU 路径
+                                ConvertAndStore(_frame);
+                            }
+                            else
+                            {
+                                ConvertAndStore(_frame);
+                            }
+                        }
                     }
                     else
                     {
