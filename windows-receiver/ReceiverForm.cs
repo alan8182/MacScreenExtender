@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -52,6 +53,7 @@ public class ReceiverForm : Form
     private readonly System.Collections.Generic.List<Discovered> _discovered = new();
     private ReceiverConfig _config = new();
     private IntPtr _oldImc = IntPtr.Zero;
+    private int _inputLatencyMs = -1;   // 输入回路延迟 EWMA（-1 = 未知）
 
     private static string ConfigDir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MacScreenExtender");
@@ -160,6 +162,8 @@ public class ReceiverForm : Form
         if (dec == null || dec.Width == 0 || _modeW == 0) return;
         string txt = $"已连接 视频{dec.Width}×{dec.Height} | 显示器{_modeW}×{_modeH}@{_modeHz}Hz";
         if (dec.Width != _modeW || dec.Height != _modeH) txt += " ⚠️不一致";
+        var lat = Interlocked.CompareExchange(ref _inputLatencyMs, 0, 0);
+        if (lat >= 0) txt += $" | 输入 ~{lat}ms";
         if (_status.Text != txt) _status.Text = txt;
     }
 
@@ -381,6 +385,23 @@ public class ReceiverForm : Form
         _dec?.UpdateCursor(BitConverter.ToSingle(p, off + 4),
                            BitConverter.ToSingle(p, off + 8),
                            p[off + 12] != 0);
+
+        // 输入回路延迟估算：本次光标回报反映的是最后一次注入的移动
+        var fw = _forwarder;
+        if (fw != null)
+        {
+            var sent = fw.LastMoveSentTicks;
+            if (sent > 0)
+            {
+                var ms = (DateTime.UtcNow.Ticks - sent) / TimeSpan.TicksPerMillisecond;
+                if (ms > 0 && ms < 2000)
+                {
+                    var old = Interlocked.CompareExchange(ref _inputLatencyMs, 0, 0);
+                    var next = old < 0 ? (int)ms : (old * 7 + (int)ms) / 8;
+                    Interlocked.Exchange(ref _inputLatencyMs, next);
+                }
+            }
+        }
     }
 
     void SendPacket(byte[] p)

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import QuartzCore
 
 /// 控制通道：TCP 8081，16 字节定长包
 /// byte0 类型：1=move(nx f32@4, ny f32@8) 2=down(btn@4) 3=up(btn@4)
@@ -85,14 +86,22 @@ final class ControlServer: @unchecked Sendable {
         }
     }
 
-    /// 每 2 秒向客户端发心跳（type 7），接收端 6 秒收不到就自动重连
+    /// 每 2 秒向客户端发心跳（type 7，带递增序号），接收端原样回传 → Mac 测得 RTT
     private func startKeepalive(_ conn: NWConnection) {
         let t = DispatchSource.makeTimerSource(queue: queue)
         keepaliveTimers[ObjectIdentifier(conn)] = t   // 强持有，防止定时器被释放后心跳静默失效
-        var packet = [UInt8](repeating: 0, count: 16)
-        packet[0] = 7
         t.schedule(deadline: .now() + 2, repeating: 2)   // 没有 schedule 定时器永不触发，接收端会 6 秒一断
         t.setEventHandler { [weak self, weak t] in
+            guard let self else { return }
+            self.keepaliveSeq &+= 1
+            let seq = self.keepaliveSeq
+            var packet = [UInt8](repeating: 0, count: 16)
+            packet[0] = 7
+            packet[4] = UInt8(seq & 0xFF)
+            packet[5] = UInt8((seq >> 8) & 0xFF)
+            packet[6] = UInt8((seq >> 16) & 0xFF)
+            packet[7] = UInt8((seq >> 24) & 0xFF)
+            self.recordSentSeq(seq)
             conn.send(content: Data(packet), completion: .contentProcessed { [weak self] error in
                 guard let self else { return }
                 if let error {
@@ -130,6 +139,41 @@ final class ControlServer: @unchecked Sendable {
     private var cursorTimer: DispatchSourceTimer?
     private var cursorLast: (Float, Float, Bool) = (-1, -1, false)
 
+    // RTT 统计（心跳回传测得）
+    private let rttLock = NSLock()
+    private var keepaliveSeq: UInt32 = 0
+    private var pendingSeqs: [UInt32: CFTimeInterval] = [:]
+    private var rttEwmaMs: Double = 0
+    private var rttMinMs: Double = 0
+
+    /// RTT 是否高于基准（缓冲膨胀信号，AIMD 用）
+    var rttElevated: Bool {
+        rttLock.lock(); defer { rttLock.unlock() }
+        return rttEwmaMs > 0 && rttEwmaMs > rttMinMs * 2 + 50
+    }
+
+    private func recordSentSeq(_ seq: UInt32) {
+        rttLock.lock()
+        pendingSeqs[seq] = CACurrentMediaTime()
+        if pendingSeqs.count > 64 {   // 淘汰最旧
+            if let oldest = pendingSeqs.keys.min() { pendingSeqs.removeValue(forKey: oldest) }
+        }
+        rttLock.unlock()
+    }
+
+    private func recordEcho(_ seq: UInt32) {
+        let now = CACurrentMediaTime()
+        rttLock.lock()
+        defer { rttLock.unlock() }
+        guard let sent = pendingSeqs.removeValue(forKey: seq) else { return }
+        let ms = (now - sent) * 1000
+        if rttEwmaMs == 0 { rttEwmaMs = ms; rttMinMs = ms }
+        else {
+            rttEwmaMs = rttEwmaMs * 0.7 + ms * 0.3
+            rttMinMs = min(ms, rttMinMs * 1.0005 + 0.01)   // 缓慢遗忘历史最低，适应网络改善
+        }
+    }
+
     private func handlePacket(_ p: Data) {
         let d = [UInt8](p)
         let type = d[0]
@@ -151,6 +195,13 @@ final class ControlServer: @unchecked Sendable {
             let down = d[4] == 1
             let code = UInt16(d[6]) | UInt16(d[7]) << 8
             injector.key(code, isDown: down)
+        case 7:   // 心跳回传 → RTT
+            let seq = UInt32(d[4]) | UInt32(d[5]) << 8 | UInt32(d[6]) << 16 | UInt32(d[7]) << 24
+            let first = (rttEwmaMs == 0)
+            recordEcho(seq)
+            if first, rttEwmaMs > 0 {
+                print(String(format: "🔁 控制通道 RTT %.0fms", rttEwmaMs))
+            }
         default:
             break
         }

@@ -25,6 +25,10 @@ public sealed class InputForwarder : IDisposable
     readonly AutoResetEvent _signal = new(false);
     volatile bool _running = true;
     readonly Thread _sender;
+    private long _lastMoveSentTicks;   // 最后一次鼠标移动的发送时刻（输入延迟估算用）
+
+    /// 最后一次移动的发送时刻（Ticks）；0 = 尚无移动
+    public long LastMoveSentTicks => Interlocked.Read(ref _lastMoveSentTicks);
 
     public InputForwarder(Func<bool> isActive, Action<byte[]> send, int w, int h)
     {
@@ -45,7 +49,10 @@ public sealed class InputForwarder : IDisposable
             float nx = (float)info.pt.X / _w, ny = (float)info.pt.Y / _h;
             switch (wParam.ToInt32())
             {
-                case WM_MOUSEMOVE: Enqueue(Move(nx, ny)); return (IntPtr)1;
+                case WM_MOUSEMOVE:
+                    Interlocked.Exchange(ref _lastMoveSentTicks, DateTime.UtcNow.Ticks);
+                    Enqueue(Move(nx, ny));
+                    return (IntPtr)1;
                 case WM_LBUTTONDOWN: Enqueue(Button(0, true, nx, ny)); return (IntPtr)1;
                 case WM_LBUTTONUP: Enqueue(Button(0, false, nx, ny)); return (IntPtr)1;
                 case WM_RBUTTONDOWN: Enqueue(Button(1, true, nx, ny)); return (IntPtr)1;

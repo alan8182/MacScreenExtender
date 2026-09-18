@@ -307,11 +307,12 @@ final class App: @unchecked Sendable {
         t.setEventHandler { [weak self] in
             guard let self, let enc = self.encoder else { return }
             let inflight = max(self.rawBroadcaster.maxInflight, self.broadcaster.maxInflight)
+            let rttBad = self.controlServer.rttElevated   // 缓冲膨胀：积压未起、延迟先涨
             let old = self.adaptiveBitrate
             var next = old
-            if inflight > 1_500_000 {
+            if inflight > 1_500_000 || rttBad {
                 next = max(10_000_000, old * 8 / 10)                        // 拥塞：-20%
-            } else if inflight < 200_000 {
+            } else if inflight < 200_000 && !rttBad {
                 next = min(self.bitrateBps, old + max(500_000, old / 20))   // 空闲：+5%
             }
             if next != old {
