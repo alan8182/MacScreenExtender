@@ -224,7 +224,7 @@ public sealed unsafe class VideoDecoder : IDisposable
                                 // GPU 直渲（解码线程执行；CPU 零拷贝）
                                 float cnx, cny; bool cvis;
                                 lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
-                                if (Renderer.RenderFrame(_frame, cnx, cny, cvis))
+                                if (Renderer.UploadFrame(_frame))
                                 {
                                     lock (_sync) { _w = _frame->width; _h = _frame->height; }
                                     _gpuFailCount = 0;

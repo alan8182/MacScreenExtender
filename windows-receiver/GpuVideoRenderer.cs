@@ -21,6 +21,7 @@ using D3D11ProcEnumT = Vortice.Direct3D11.ID3D11VideoProcessorEnumerator;
 using D3D11ProcessorT = Vortice.Direct3D11.ID3D11VideoProcessor;
 using D3D11OutputViewT = Vortice.Direct3D11.ID3D11VideoProcessorOutputView;
 using D3D11RtvT = Vortice.Direct3D11.ID3D11RenderTargetView;
+using D3D11InputViewT = Vortice.Direct3D11.ID3D11VideoProcessorInputView;
 using DxgiSwapChainT = Vortice.DXGI.IDXGISwapChain1;
 using DxgiSurfaceT = Vortice.DXGI.IDXGISurface;
 using FeatureLevelT = Vortice.Direct3D.FeatureLevel;
@@ -52,6 +53,16 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private ID2D1Bitmap1? _d2dTarget;
     private ID2D1Bitmap1? _cursorD2d;
     private AVBufferRef* _hwRef;
+    private D3D11Texture2DT? _videoTex;             // 解码帧的 GPU 持久副本（含黑边）
+    private ID3D11VideoProcessorOutputView? _videoOutView;
+    private ID3D11RenderTargetView? _videoRtv;
+    private D3D11Texture2DT? _backBuffer;
+    private int _lastDx, _lastDy, _lastDw = 1, _lastDh = 1;
+
+    // 光标最新状态（控制通道 60Hz 回报；合成循环读取）——与解码节拍解耦
+    private readonly object _cursorLock = new();
+    private float _curNx, _curNy;
+    private bool _curVisible;
 
     private IntPtr _hwnd;
     private int _swapW, _swapH;
@@ -182,7 +193,8 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _resizePending = true;
     }
 
-    public bool RenderFrame(AVFrame* frame, float cursorNx, float cursorNy, bool cursorVisible)
+    /// 解码线程：把硬件解码帧转 BGRA 并缩放/加黑边到持久视频纹理（不直接上屏）
+    public bool UploadFrame(AVFrame* frame)
     {
         try
         {
@@ -206,35 +218,54 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             using var inView = _videoDevice.CreateVideoProcessorInputView(tex, _procEnum, inDesc);
             if (inView == null) { _log("GPU: InputView 创建失败"); return false; }
 
-            // 等比目标区（黑边）
+            // 等比目标区（黑边），写入持久视频纹理
             double s = Math.Min((double)_swapW / srcW, (double)_swapH / srcH);
             int dw = Math.Max(1, (int)(srcW * s));
             int dh = Math.Max(1, (int)(srcH * s));
             int dx = (_swapW - dw) / 2;
             int dy = (_swapH - dh) / 2;
+            _lastDx = dx; _lastDy = dy; _lastDw = dw; _lastDh = dh;
 
-            _context.ClearRenderTargetView(_rtv, new Color4(0, 0, 0, 1));
-
-            var stream = new VideoProcessorStream
-            {
-                Enable = true,
-                InputSurface = inView,
-            };
             _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
                 new RawRect(dx, dy, dx + dw, dy + dh));
-            if (!_bltLogged) { _bltLogged = true; _log("GPU: 首次 VideoProcessorBlt"); }
-            _videoContext.VideoProcessorBlt(_processor, _outputView, 0u, new[] { stream });
-
-            if (cursorVisible) DrawCursor(dx, dy, dw, dh, cursorNx, cursorNy);
-
-            _swapChain.Present(1, PresentFlags.None);
+            _videoContext.VideoProcessorBlt(_processor, _videoOutView, 0u, new[] { stream(0, 0, srcW, srcH, inView) });
             return true;
         }
         catch (Exception ex)
         {
-            _log($"GPU: 渲染异常 {ex.GetType().Name}: {ex.Message}");
+            _log($"GPU: 帧上传异常 {ex.GetType().Name}: {ex.Message}");
             return false;
         }
+    }
+
+    private VideoProcessorStream stream(int sx, int sy, int sw, int sh, D3D11InputViewT inView)
+    {
+        _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
+            new RawRect(sx, sy, sx + sw, sy + sh));
+        return new VideoProcessorStream { Enable = true, InputSurface = inView };
+    }
+
+    /// 呈现循环（UI 线程 15ms）：视频纹理拷贝到后备缓冲 + 按最新光标位置叠画 + 垂直同步上屏。
+    /// 光标更新因此与解码节拍解耦——静止画面下光标依然 60Hz 丝滑
+    public void Compose()
+    {
+        try
+        {
+            if (_swapChain == null || _videoTex == null || _backBuffer == null || _context == null) return;
+            _context.CopyResource(_backBuffer, _videoTex);
+
+            float cnx, cny; bool cvis;
+            lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
+            if (cvis) DrawCursor(_lastDx, _lastDy, _lastDw, _lastDh, cnx, cny);
+
+            _swapChain.Present(1, PresentFlags.None);
+        }
+        catch { }
+    }
+
+    public void UpdateCursor(float nx, float ny, bool visible)
+    {
+        lock (_cursorLock) { _curNx = nx; _curNy = ny; _curVisible = visible; }
     }
 
     private void DrawCursor(float dx, float dy, float dw, float dh, float nx, float ny)
@@ -289,7 +320,29 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _d2dTarget?.Dispose(); _d2dTarget = null;
         if (_swapChain == null || _device == null || _videoDevice == null || _procEnum == null) return;
 
-        using var backBuffer = _swapChain.GetBuffer<D3D11Texture2DT>(0);
+        using var backBuffer = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
+        _backBuffer?.Dispose();
+        _backBuffer = new D3D11Texture2DT(backBuffer.NativePointer);
+
+        // 持久视频纹理（BGRA，含黑边）
+        _videoOutView?.Dispose(); _videoOutView = null;
+        _videoRtv?.Dispose(); _videoRtv = null;
+        _videoTex?.Dispose(); _videoTex = null;
+        var vtDesc = new Texture2DDescription
+        {
+            Width = (uint)_swapW, Height = (uint)_swapH, MipLevels = 1, ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Default, BindFlags = BindFlags.RenderTarget,
+        };
+        _videoTex = _device.CreateTexture2D(vtDesc);
+        var vtOutDesc = new VideoProcessorOutputViewDescription
+        {
+            ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
+        };
+        _videoOutView = _videoDevice.CreateVideoProcessorOutputView(_videoTex, _procEnum, vtOutDesc);
+        _videoRtv = _device.CreateRenderTargetView(_videoTex, null);
+        _context.ClearRenderTargetView(_videoRtv, new Color4(0, 0, 0, 1));
+
         _rtv = _device.CreateRenderTargetView(backBuffer, null);
         var outDesc = new VideoProcessorOutputViewDescription
         {

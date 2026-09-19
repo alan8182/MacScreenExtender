@@ -48,6 +48,7 @@ public class ReceiverForm : Form
     private string _ip;
     private System.Windows.Forms.Timer _watchdog;
     private System.Windows.Forms.Timer _paint;
+    private System.Windows.Forms.Timer _compose;
     private VideoDecoder _dec;
     private bool _autoFullscreenDone;   // 首帧后自动全屏只做一次，Esc 退出后不再抢
     private byte[] _cursorSprite;       // 本地光标精灵（混入解码帧缓冲，单次上屏无闪烁）
@@ -107,6 +108,11 @@ public class ReceiverForm : Form
 
         // 绘制：帧到即画（FrameReady 事件驱动）。定时器仅作兜底（窗口暴露/缩放后补绘），
         // 不能高频——它不看有没有新帧，高频会把静止画面反复 blit 白烧 GPU/内存
+        // GPU 合成循环 60Hz：光标与解码节拍解耦的关键
+        _compose = new System.Windows.Forms.Timer { Interval = 15 };
+        _compose.Tick += (_, _) => _gpu?.Compose();
+        _compose.Start();
+
         _paint = new System.Windows.Forms.Timer { Interval = 200 };
         _paint.Tick += (_, _) => PaintTick();
         _paint.Start();
@@ -444,9 +450,11 @@ public class ReceiverForm : Form
     void HandleCtlPacket(byte[] p, int off)
     {
         if (p[off] != 8) return;   // 7=心跳（已在读循环刷新 keepalive）
-        _dec?.UpdateCursor(BitConverter.ToSingle(p, off + 4),
-                           BitConverter.ToSingle(p, off + 8),
-                           p[off + 12] != 0);
+        float nx = BitConverter.ToSingle(p, off + 4);
+        float ny = BitConverter.ToSingle(p, off + 8);
+        bool vis = p[off + 12] != 0;
+        _dec?.UpdateCursor(nx, ny, vis);        // CPU 路径：混入解码帧
+        _gpu?.UpdateCursor(nx, ny, vis);        // GPU 路径：合成循环实时读取
 
         // 输入回路延迟估算：本次光标回报反映的是最后一次注入的移动
         var fw = _forwarder;
@@ -679,6 +687,7 @@ public class ReceiverForm : Form
         _watchdog?.Stop();
         _forwarder?.Dispose();
         _retryTimer?.Stop();
+        _compose?.Stop();
         _dec?.Dispose();
         _gpu?.Dispose(); _gpu = null;
         base.OnFormClosed(e);
