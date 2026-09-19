@@ -83,7 +83,13 @@ public class ReceiverForm : Form
         var discLabel = new Label { Text = "发现:", Left = 20, Top = 78, AutoSize = true };
         _discover = new ComboBox { Left = 70, Top = 74, Width = 355, DropDownStyle = ComboBoxStyle.DropDownList };
         _gpuCheck = new CheckBox { Text = "GPU 渲染（实验性，崩溃风险自担）", Left = 20, Top = 100, AutoSize = true, ForeColor = Color.DimGray };
-        _gpuCheck.CheckedChanged += (_, _) => { _config.Gpu = _gpuCheck.Checked; SaveConfig(); if (_started) StartDecoder(); };
+        _gpuCheck.CheckedChanged += (_, _) =>
+        {
+            _config.Gpu = _gpuCheck.Checked;
+            SaveConfig();
+            _autoFullscreenDone = false;   // 切换渲染路径 = 重新连接意图 → 重新自动全屏
+            if (_started) StartDecoder();
+        };
         _discover.SelectedIndexChanged += (_, _) =>
         {
             if (_discover.SelectedItem is Discovered d) _ipBox.Text = d.Ip;
