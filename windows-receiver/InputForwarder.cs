@@ -16,6 +16,7 @@ public sealed class InputForwarder : IDisposable
     const int WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
 
     readonly Func<bool> _isActive;
+    readonly Func<bool> _healthy;   // 控制通道健康？失联时不吞点击（放行给本机）
     readonly Action<byte[]> _send;
     readonly int _w, _h;
     IntPtr _mouseHook, _kbdHook;
@@ -41,9 +42,10 @@ public sealed class InputForwarder : IDisposable
     /// 最后一次移动的发送时刻（Ticks）；0 = 尚无移动
     public long LastMoveSentTicks => Interlocked.Read(ref _lastMoveSentTicks);
 
-    public InputForwarder(Func<bool> isActive, Action<byte[]> send, int w, int h)
+    public InputForwarder(Func<bool> isActive, Action<byte[]> send, int w, int h, Func<bool>? healthy = null)
     {
         _isActive = isActive; _send = send; _w = w; _h = h;
+        _healthy = healthy ?? (() => true);
         _mouseProc = MouseHookProc;
         _kbdProc = KbdHookProc;
         _mouseHook = NativeMethods.SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, NativeMethods.GetModuleHandle(null), 0);
@@ -56,6 +58,7 @@ public sealed class InputForwarder : IDisposable
     {
         if (nCode >= 0 && _isActive())
         {
+            int msg = wParam.ToInt32();
             var info = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
             float nx = (float)info.pt.X / _w, ny = (float)info.pt.Y / _h;
             switch (wParam.ToInt32())
@@ -66,12 +69,18 @@ public sealed class InputForwarder : IDisposable
                     Enqueue(Move(nx, ny));
                     // 移动放行：让系统光标自然移动（它就是光标层）；点击/滚轮仍被吞掉
                     return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
-                case WM_LBUTTONDOWN: Enqueue(Button(0, true, nx, ny)); return (IntPtr)1;
-                case WM_LBUTTONUP: Enqueue(Button(0, false, nx, ny)); return (IntPtr)1;
-                case WM_RBUTTONDOWN: Enqueue(Button(1, true, nx, ny)); return (IntPtr)1;
-                case WM_RBUTTONUP: Enqueue(Button(1, false, nx, ny)); return (IntPtr)1;
-                case WM_MBUTTONDOWN: Enqueue(Button(2, true, nx, ny)); return (IntPtr)1;
-                case WM_MBUTTONUP: Enqueue(Button(2, false, nx, ny)); return (IntPtr)1;
+                case WM_LBUTTONDOWN:
+                case WM_LBUTTONUP:
+                case WM_RBUTTONDOWN:
+                case WM_RBUTTONUP:
+                case WM_MBUTTONDOWN:
+                case WM_MBUTTONUP:
+                    byte btn = 0; bool isDown = msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN;
+                    if (msg is WM_RBUTTONDOWN or WM_RBUTTONUP) btn = 1;
+                    if (msg is WM_MBUTTONDOWN or WM_MBUTTONUP) btn = 2;
+                    if (!_healthy()) return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);   // 失联：放行给本机
+                    Enqueue(Button(btn, isDown, nx, ny));
+                    return (IntPtr)1;
                 case WM_MOUSEWHEEL:
                     short delta = (short)((info.mouseData >> 16) & 0xFFFF);
                     Enqueue(Wheel(0, delta / 120f));

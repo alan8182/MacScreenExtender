@@ -379,7 +379,7 @@ public class ReceiverForm : Form
                 Bounds = Screen.FromControl(this).Bounds;
                 _oldImc = ImmAssociateContext(Handle, IntPtr.Zero);   // 禁本机 IME，输入全交 Mac
                 _forwarder?.Dispose();
-                _forwarder = new InputForwarder(ControlActive, SendPacket, _screenW, _screenH);
+                _forwarder = new InputForwarder(ControlActive, SendPacket, _screenW, _screenH, ChannelHealthy);
                 Cursor.Show();   // 保证系统光标可见（它就是零延迟光标层）
             }
             if (wasWindowed && _status.Text != "已连接") _status.Text = "已连接";
@@ -495,8 +495,23 @@ public class ReceiverForm : Form
     {
         lock (_ctlLock)
         {
-            try { _ctlStream?.Write(p, 0, p.Length); } catch { _ctlStream = null; }
+            try
+            {
+                if (_ctlStream == null) { BeginInvoke(new Action(TryReconnect)); return; }
+                _ctlStream.Write(p, 0, p.Length);
+            }
+            catch { _ctlStream = null; BeginInvoke(new Action(TryReconnect)); }
         }
+    }
+
+    void TryReconnect()
+    {
+        if (!string.IsNullOrEmpty(_ip)) ConnectCtl(_ip);
+    }
+
+    bool ChannelHealthy()
+    {
+        lock (_ctlLock) return _ctlStream != null;
     }
 
     bool ControlActive()

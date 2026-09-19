@@ -144,6 +144,7 @@ final class ControlServer: @unchecked Sendable {
     private let rttLock = NSLock()
     private var keepaliveSeq: UInt32 = 0
     private var _lastInjectTime: Double = -100
+    private var _moveCount = 0
 
     /// 距最近一次 Windows 注入的毫秒数（光标所有权判定用）
     var msSinceLastInject: Int64 { Int64((ProcessInfo.processInfo.systemUptime - _lastInjectTime) * 1000) }
@@ -192,9 +193,12 @@ final class ControlServer: @unchecked Sendable {
         switch type {
         case 1:
             _lastInjectTime = ProcessInfo.processInfo.systemUptime
+            _moveCount += 1
+            if _moveCount % 500 == 1 { Log.write("🖱 移动注入 #\(_moveCount) (\(String(format: "%.2f", f32(4))), \(String(format: "%.2f", f32(8))))") }
             injector.move(nx: f32(4), ny: f32(8))
         case 2, 3:
             _lastInjectTime = ProcessInfo.processInfo.systemUptime
+            Log.write("🖱 点击 btn=\(d[4]) \(type == 2 ? "按下" : "抬起") @\(String(format: "%.2f", f32(4))), \(String(format: "%.2f", f32(8))))")
             injector.button(d[4], isDown: type == 2, nx: f32(4), ny: f32(8))
         case 4:
             injector.scroll(dx: f32(4), dy: f32(8))
