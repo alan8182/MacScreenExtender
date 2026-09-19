@@ -42,9 +42,10 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private D3D11VideoContextT? _videoContext;
     private D3D11ProcEnumT? _procEnum;
     private D3D11ProcessorT? _processor;
-    private D3D11OutputViewT? _outputView;
+    private D3D11OutputViewT? _videoOutView;   // 视频纹理（源分辨率）的输出视图，解码线程 Blt 用
+    private D3D11InputViewT? _videoInView;     // 视频纹理的输入视图，合成 Blt 用
     private D3D11Texture2DT? _videoTex;
-    private D3D11RtvT? _videoRtv;
+    private D3D11OutputViewT? _bbOutView;      // 后备缓冲的输出视图，合成 Blt 用
     private D3D11Texture2DT? _backBuffer;
     private IntPtr _hwnd;
     private nint _devicePtr;
@@ -52,7 +53,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private volatile bool _resizePending;
     private int _pendW, _pendH;
     private int _srcW = -1, _srcH = -1;
-    private bool _bltLogged;
+    private bool _bltLogged, _vtLogged;
 
     // 专用合成线程：Present(1) 自动锁定显示器刷新率（120Hz 屏 = 120 次合成/秒）
     private Thread? _composeThread;
@@ -122,9 +123,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0u, VideoFrameFormat.Progressive);
             SetColorSpace();
 
-            RecreateTargets();
-            if (_outputView == null || _rtv == null || _videoTex == null) return false;
-
             _log("GPU: 渲染管线全就绪");
             StartComposeLoop();
             return true;
@@ -170,22 +168,23 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _videoContext.VideoProcessorSetOutputColorSpace(_processor, outCs);
     }
 
-    /// 解码线程：把硬件解码帧转 BGRA 并缩放/加黑边到持久视频纹理（不直接上屏）
+    /// 解码线程：把硬件解码帧转 BGRA 写入"源分辨率视频纹理"（无缩放，不直接上屏）
     public bool UploadFrame(AVFrame* frame)
     {
         try
         {
             if (!EnsureDevice()) return false;
-            if (_resizePending) ApplyPendingResize();
-            if (_srcW != frame->width || _srcH != frame->height)
+            int srcW = frame->width, srcH = frame->height;
+            if (srcW != _srcW || srcH != _srcH)
             {
-                _srcW = frame->width; _srcH = frame->height;
-                _log($"GPU: 源分辨率 {_srcW}x{_srcH}");
+                _srcW = srcW; _srcH = srcH;
+                RecreateVideoTex(srcW, srcH);
+                _log($"GPU: 源分辨率 {srcW}x{srcH}");
             }
+            if (_videoTex == null || _videoOutView == null) return false;
 
             var tex = new D3D11Texture2DT((nint)frame->data[0]);
             int slice = (int)(nint)frame->data[1];
-            int srcW = frame->width, srcH = frame->height;
 
             var inDesc = new VideoProcessorInputViewDescription
             {
@@ -194,17 +193,13 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             };
             using var inView = _videoDevice.CreateVideoProcessorInputView(tex, _procEnum, inDesc);
             if (inView == null) { _log("GPU: InputView 创建失败"); return false; }
+            if (!_bltLogged) { _bltLogged = true; _log("GPU: 首次 VideoProcessorBlt"); }
 
-            // 等比目标区（黑边），写入持久视频纹理
-            double s = Math.Min((double)_swapW / srcW, (double)_swapH / srcH);
-            int dw = Math.Max(1, (int)(srcW * s));
-            int dh = Math.Max(1, (int)(srcH * s));
-            int dx = (_swapW - dw) / 2;
-            int dy = (_swapH - dh) / 2;
-
+            _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
+                new RawRect(0, 0, srcW, srcH));
             _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
-                new RawRect(dx, dy, dx + dw, dy + dh));
-            _videoContext.VideoProcessorBlt(_processor, _outputView, 0u, new[] { stream(0, 0, srcW, srcH, inView) });
+                new RawRect(0, 0, srcW, srcH));
+            _videoContext.VideoProcessorBlt(_processor, _videoOutView, 0u, new[] { stream(inView) });
             return true;
         }
         catch (Exception ex)
@@ -214,6 +209,11 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         }
     }
 
+    private VideoProcessorStream stream(D3D11InputViewT inView)
+    {
+        return new VideoProcessorStream { Enable = true, InputSurface = inView };
+    }
+
     private VideoProcessorStream stream(int sx, int sy, int sw, int sh, D3D11InputViewT inView)
     {
         _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
@@ -221,13 +221,51 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         return new VideoProcessorStream { Enable = true, InputSurface = inView };
     }
 
-    /// 合成一帧：视频纹理拷到后备缓冲 + 垂直同步上屏（光标由 Windows 系统承担）
+    /// 合成线程：等比缩放视频纹理到后备缓冲 + 垂直同步上屏。
+    /// 尺寸调整也在此线程应用（与 Present 串行，规避 ResizeBuffers 的线程约束）
     public void Compose()
     {
         try
         {
-            if (_swapChain == null || _videoTex == null || _backBuffer == null || _context == null) return;
-            _context.CopyResource(_backBuffer, _videoTex);
+            if (_swapChain == null || _videoTex == null || _context == null || _device == null) return;
+
+            if (_resizePending)
+            {
+                _resizePending = false;
+                _rtv?.Dispose(); _rtv = null;
+                _bbOutView?.Dispose(); _bbOutView = null;
+                _backBuffer?.Dispose(); _backBuffer = null;
+                var rr = _swapChain.ResizeBuffers(0, (uint)_pendW, (uint)_pendH, Format.Unknown, SwapChainFlags.None);
+                if (rr.Success)
+                {
+                    _swapW = _pendW; _swapH = _pendH;
+                    using var bb = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
+                    _backBuffer = new D3D11Texture2DT(bb.NativePointer);
+                    _rtv = _device.CreateRenderTargetView(bb, null);
+                    var obDesc = new VideoProcessorOutputViewDescription
+                    {
+                        ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
+                    };
+                    _bbOutView = _videoDevice.CreateVideoProcessorOutputView(bb, _procEnum, obDesc);
+                    _log($"GPU: 交换链调整 {_swapW}x{_swapH}");
+                }
+                else
+                {
+                    _log($"GPU: ResizeBuffers 失败 {rr}");
+                }
+            }
+
+            // 等比目标区（黑边由 Clear 铺底）
+            double s = Math.Min((double)_swapW / _srcW, (double)_swapH / _srcH);
+            int dw = Math.Max(1, (int)(_srcW * s));
+            int dh = Math.Max(1, (int)(_srcH * s));
+            int dx = (_swapW - dw) / 2;
+            int dy = (_swapH - dh) / 2;
+
+            _context.ClearRenderTargetView(_rtv, new Color4(0, 0, 0, 1));
+            _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
+                new RawRect(dx, dy, dx + dw, dy + dh));
+            _videoContext.VideoProcessorBlt(_processor, _bbOutView, 0u, new[] { stream(_videoInView) });
             _swapChain.Present(1, PresentFlags.None);
         }
         catch { }
@@ -258,57 +296,41 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _resizePending = true;
     }
 
-    private void ApplyPendingResize()
-    {
-        _resizePending = false;
-        if (_swapChain == null) return;
-        _log($"GPU: 交换链调整 {_pendW}x{_pendH}");
-        var r = _swapChain.ResizeBuffers(0, (uint)_pendW, (uint)_pendH, Format.Unknown, SwapChainFlags.None);
-        if (r.Failure)
-        {
-            _log($"GPU: ResizeBuffers 失败 {r}");
-            return;
-        }
-        _swapW = _pendW; _swapH = _pendH;
-        RecreateTargets();
-    }
 
-    /// 重建依赖交换链后备缓冲的资源（RTV / 持久视频纹理 / 输出视图）
-    private void RecreateTargets()
+    /// (重建)源分辨率视频纹理 + 输入/输出视图
+    private void RecreateVideoTex(int srcW, int srcH)
     {
-        _outputView?.Dispose(); _outputView = null;
-        _rtv?.Dispose(); _rtv = null;
-        _videoRtv?.Dispose(); _videoRtv = null;
+        _videoInView?.Dispose(); _videoInView = null;
+        _videoOutView?.Dispose(); _videoOutView = null;
         _videoTex?.Dispose(); _videoTex = null;
-        _backBuffer?.Dispose(); _backBuffer = null;
-        if (_swapChain == null || _device == null || _videoDevice == null || _procEnum == null) return;
+        if (_device == null || _videoDevice == null || _procEnum == null) return;
 
-        using var backBuffer = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
-        _backBuffer = new D3D11Texture2DT(backBuffer.NativePointer);
-        _rtv = _device.CreateRenderTargetView(backBuffer, null);
-
-        // 持久视频纹理（BGRA，含黑边）
         var vtDesc = new Texture2DDescription
         {
-            Width = (uint)_swapW, Height = (uint)_swapH, MipLevels = 1, ArraySize = 1,
+            Width = (uint)srcW, Height = (uint)srcH, MipLevels = 1, ArraySize = 1,
             Format = Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
             Usage = ResourceUsage.Default, BindFlags = BindFlags.RenderTarget,
         };
         _videoTex = _device.CreateTexture2D(vtDesc);
-        var vtOutDesc = new VideoProcessorOutputViewDescription
+        var inDesc = new VideoProcessorInputViewDescription
+        {
+            ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+            Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
+        };
+        _videoInView = _videoDevice.CreateVideoProcessorInputView(_videoTex, _procEnum, inDesc);
+        var outDesc = new VideoProcessorOutputViewDescription
         {
             ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
         };
-        _outputView = _videoDevice.CreateVideoProcessorOutputView(_videoTex, _procEnum, vtOutDesc);
-        _videoRtv = _device.CreateRenderTargetView(_videoTex, null);
-        _context.ClearRenderTargetView(_videoRtv, new Color4(0, 0, 0, 1));
+        _videoOutView = _videoDevice.CreateVideoProcessorOutputView(_videoTex, _procEnum, outDesc);
     }
 
     private void TeardownDevice()
     {
-        _outputView?.Dispose(); _outputView = null;
+        _videoInView?.Dispose(); _videoInView = null;
+        _videoOutView?.Dispose(); _videoOutView = null;
+        _bbOutView?.Dispose(); _bbOutView = null;
         _rtv?.Dispose(); _rtv = null;
-        _videoRtv?.Dispose(); _videoRtv = null;
         _videoTex?.Dispose(); _videoTex = null;
         _backBuffer?.Dispose(); _backBuffer = null;
         _processor?.Dispose(); _processor = null;

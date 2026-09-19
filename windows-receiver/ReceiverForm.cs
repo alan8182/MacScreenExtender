@@ -356,7 +356,7 @@ public class ReceiverForm : Form
                 _oldImc = ImmAssociateContext(Handle, IntPtr.Zero);   // 禁本机 IME，输入全交 Mac
                 _forwarder?.Dispose();
                 _forwarder = new InputForwarder(ControlActive, SendPacket, _screenW, _screenH);
-                // 系统光标保持可见：它就是零延迟光标层（Windows 渲染，跟随手部零延迟）
+                Cursor.Show();   // 保证系统光标可见（它就是零延迟光标层）
             }
             if (wasWindowed && _status.Text != "已连接") _status.Text = "已连接";
         }
