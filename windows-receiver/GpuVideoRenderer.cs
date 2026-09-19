@@ -396,7 +396,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         if (_cursorD2d != null || _pendingCursor == null || _d2dContext == null) return;
         var (px, w, h) = _pendingCursor.Value;
         var props = new BitmapProperties1(
-            new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Premultiplied));
+            new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Premultiplied), 96f, 96f);
         fixed (byte* p = px)
         {
             var size = new SizeI(w, h);
@@ -461,10 +461,19 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
         if (_d2dContext != null)
         {
-            using var surface = backBuffer.QueryInterface<DxgiSurfaceT>();
-            var props = new BitmapProperties1(
-                new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Ignore));
-            _d2dTarget = _d2dContext.CreateBitmapFromDxgiSurface(surface, props);
+            try
+            {
+                using var surface = backBuffer.QueryInterface<DxgiSurfaceT>();
+                var props = new BitmapProperties1(
+                    new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Premultiplied), 96f, 96f);
+                _d2dTarget = _d2dContext.CreateBitmapFromDxgiSurface(surface, props);
+                _log("GPU: D2D 目标就绪");
+            }
+            catch (Exception ex)
+            {
+                _log($"GPU: D2D 目标创建失败（光标停用，视频不受影响）: {ex.Message}");
+                _d2dTarget = null;
+            }
         }
     }
 
