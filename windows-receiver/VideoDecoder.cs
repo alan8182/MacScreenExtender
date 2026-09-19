@@ -154,26 +154,10 @@ public sealed unsafe class VideoDecoder : IDisposable
         // 帧线程+d3d11va+外部设备的崩溃组合）；软解 HEVC 用 2 线程换吞吐
 
         // d3d11va 硬解：解码（熵解码+帧重建，占 CPU 大头）交给显卡。
-        // 优先用渲染器的设备（解码纹理与渲染同设备 → 帧可零拷贝上屏）；
-        // 不可用则自建设备（走 CPU 下载路径）；再失败退回软解
+        // 设备由 ffmpeg 自建（实测稳定）；渲染器从解码帧上"采用"同一设备，帧零拷贝上屏。
+        // 硬解不可用时自动退回软解
         bool hwAttached = false;
-        if (!_hwDisabled)
-        {
-            IntPtr hwRefPtr = IntPtr.Zero;
-            if (CreateDecoderHwRef != null) hwRefPtr = CreateDecoderHwRef();
-            if (hwRefPtr != IntPtr.Zero)
-            {
-                _dec->hw_device_ctx = (AVBufferRef*)hwRefPtr;   // 解码器持有该引用
-                hwAttached = true;
-                _srcFormat = -1;
-                _consecSendErr = 0;
-            }
-            else
-            {
-                _hwDisabled = true;
-            }
-        }
-        if (!hwAttached && !_hwDisabled)
+        if (!_hwDisabled && _hwDev == null)
         {
             AVBufferRef* dev = null;
             if (ffmpeg.av_hwdevice_ctx_create(&dev, AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0) == 0)
@@ -184,11 +168,11 @@ public sealed unsafe class VideoDecoder : IDisposable
             {
                 _hwDisabled = true;
             }
-            if (_hwDev != null)
-            {
-                _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
-                hwAttached = true;
-            }
+        }
+        if (_hwDev != null && !_hwDisabled)
+        {
+            _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
+            hwAttached = true;
         }
         _srcFormat = -1;
         _consecSendErr = 0;

@@ -53,8 +53,8 @@ final class VideoEncoder: @unchecked Sendable {
                     isHEVC ? kVTProfileLevel_HEVC_Main_AutoLevel : kVTProfileLevel_H264_High_AutoLevel)
         setProperty(kVTCompressionPropertyKey_AverageBitRate, bitrateBps as NSNumber)
         setProperty(kVTCompressionPropertyKey_ExpectedFrameRate, fps as NSNumber)
-        setProperty(kVTCompressionPropertyKey_MaxKeyFrameInterval, (fps * 4) as NSNumber)       // 4s：静止时减少关键帧突刺
-        setProperty(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, 4.0 as NSNumber)
+        setProperty(kVTCompressionPropertyKey_MaxKeyFrameInterval, (fps * 2) as NSNumber)
+        setProperty(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, 2.0 as NSNumber)
         setProperty(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)
         setProperty(kVTCompressionPropertyKey_MaxFrameDelayCount, 0 as NSNumber)   // 零缓冲：编码完立刻吐
         if !isHEVC {

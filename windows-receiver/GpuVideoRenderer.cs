@@ -64,41 +64,31 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
     public GpuVideoRenderer(Action<string> log) { _log = log; }
 
-    public bool Initialize(IntPtr hwnd, int width, int height)
+    /// 只记录窗口参数；设备在首个硬件解码帧到达时从帧上"采用"
+    public void Initialize(IntPtr hwnd, int width, int height)
     {
+        _hwnd = hwnd;
+        _swapW = Math.Max(1, width);
+        _swapH = Math.Max(1, height);
+        _log($"GPU: 渲染器待命（窗口 {_swapW}x{_swapH}，等待解码设备）");
+    }
+
+    /// 从解码帧上采用设备（解码纹理属于它），并搭建整条渲染管线
+    private bool EnsureDevice(AVFrame* frame)
+    {
+        if (_device != null) return true;
         try
         {
-            _hwnd = hwnd;
-            _swapW = Math.Max(1, width);
-            _swapH = Math.Max(1, height);
-
-            _log($"GPU: 创建 D3D11 设备 ({_swapW}x{_swapH})");
-            Result r = D3D11.D3D11CreateDevice((IDXGIAdapter?)null, DriverType.Hardware,
-                DeviceCreationFlags.BgraSupport | DeviceCreationFlags.VideoSupport,
-                new FeatureLevelT[] { FeatureLevelT.Level_11_1, FeatureLevelT.Level_11_0 },
-                out D3D11DeviceT? device);
-            if (r.Failure || device == null)
-            {
-                _log($"GPU: 11.1/11.0 创建失败({r})，重试默认特性等级");
-                r = D3D11.D3D11CreateDevice((IDXGIAdapter?)null, DriverType.Hardware,
-                    DeviceCreationFlags.BgraSupport | DeviceCreationFlags.VideoSupport, null, out device);
-                if (r.Failure || device == null)
-                {
-                    _log($"GPU: 设备创建失败 {r}");
-                    return false;
-                }
-            }
-            _device = device;
-            _context = device.ImmediateContext;
-            _log("GPU: 设备创建成功");
+            using var tex = new D3D11Texture2DT((nint)frame->data[0]);
+            _device = tex.Device;
+            _context = _device.ImmediateContext;
+            _log("GPU: 采用解码设备");
 
             using var mt = _context.QueryInterface<ID3D11Multithread>();
             mt.SetMultithreadProtected(true);
 
             using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
-            using var adapter = dxgiDevice.GetAdapter();
-            using var factory = adapter.GetParent<IDXGIFactory2>();
-            _log("GPU: DXGI 工厂就绪");
+            using var factory = dxgiDevice.GetParent<IDXGIFactory2>();
 
             var scDesc = new SwapChainDescription1
             {
@@ -114,7 +104,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 AlphaMode = AlphaMode.Ignore,
                 Flags = SwapChainFlags.None,
             };
-            _swapChain = factory.CreateSwapChainForHwnd(_device, hwnd, scDesc);
+            _swapChain = factory.CreateSwapChainForHwnd(_device, _hwnd, scDesc);
             if (_swapChain == null) { _log("GPU: 交换链创建失败"); return false; }
             _log("GPU: 交换链就绪 (FLIP_SEQUENTIAL)");
 
@@ -125,24 +115,21 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             _processor = _videoDevice.CreateVideoProcessor(_procEnum, 0u);
             if (_processor == null) { _log("GPU: VideoProcessor 创建失败"); return false; }
             _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0u, VideoFrameFormat.Progressive);
-            _log("GPU: 视频处理器就绪");
             SetColorSpace();
 
             RecreateTargets();
             if (_outputView == null || _rtv == null) return false;
 
-            D2D1.D2D1CreateFactory(FactoryType.SingleThreaded, out ID2D1Factory1? f);
-            _d2dFactory = f;
-            if (_d2dFactory == null) { _log("GPU: D2D 工厂创建失败"); return false; }
+            _d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(FactoryType.SingleThreaded);
             _d2dDevice = _d2dFactory.CreateDevice(dxgiDevice);
             _d2dContext = _d2dDevice.CreateDeviceContext(DeviceContextOptions.None);
-            _log("GPU: D2D 上下文就绪");
-
+            _log("GPU: 渲染管线全就绪");
             return true;
         }
         catch (Exception ex)
         {
-            _log($"GPU: 初始化异常 {ex.GetType().Name}: {ex.Message}");
+            _log($"GPU: 设备采用异常 {ex.GetType().Name}: {ex.Message}");
+            _device = null; _context = null;
             return false;
         }
     }
@@ -180,30 +167,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _videoContext.VideoProcessorSetOutputColorSpace(_processor, outCs);
     }
 
-    /// 构造供解码器使用的 D3D11VA 设备引用（解码纹理与渲染同设备）
-    public IntPtr CreateDecoderHwRef()
-    {
-        if (_device == null) return IntPtr.Zero;
-        if (_hwRef == default)
-        {
-            var hw = ffmpeg.av_hwdevice_ctx_alloc(AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA);
-            if (hw == null) return IntPtr.Zero;
-            var c = (AVD3D11VADeviceContext*)hw->data;
-            // QI 出新引用交给 ffmpeg（teardown 时它会 Release）
-            c->device = (FFmpeg.AutoGen.ID3D11Device*)_device.QueryInterface<D3D11DeviceT>().NativePointer;
-            if (ffmpeg.av_hwdevice_ctx_init(hw) != 0)
-            {
-                ffmpeg.av_buffer_unref(&hw);
-                _log("GPU: ffmpeg 硬件设备初始化失败");
-                return IntPtr.Zero;
-            }
-            _hwRef = hw;
-            _log("GPU: ffmpeg 硬件设备上下文就绪");
-        }
-        var decRef = ffmpeg.av_buffer_ref((AVBufferRef*)_hwRef);
-        return (IntPtr)decRef;
-    }
-
     public void SetCursorSprite(byte[] bgra, int w, int h)
     {
         // 跨线程安全：只存内存，帧渲染时惰性建 GPU 资源
@@ -223,7 +186,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     {
         try
         {
-            if (_device == null || _swapChain == null || _videoContext == null || _processor == null) return false;
+            if (!EnsureDevice(frame)) return false;
             if (_resizePending) ApplyPendingResize();
             if (_srcW != frame->width || _srcH != frame->height)
             {

@@ -18,6 +18,7 @@ internal static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
+        CrashGuard.Install();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) =>
             Log.Write($"UI线程异常: {e.Exception.GetType().Name}: {e.Exception.Message}\n{e.Exception.StackTrace}");
@@ -292,16 +293,9 @@ public class ReceiverForm : Form
             try
             {
                 _gpu = new GpuVideoRenderer(Log.Write);
-                if (_gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height)))
-                {
-                    _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
-                    Log.Write("GPU 渲染路径启用");
-                }
-                else
-                {
-                    _gpu.Dispose(); _gpu = null;
-                    Log.Write("GPU 初始化失败，使用 CPU 渲染路径");
-                }
+                _gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height));
+                _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
+                Log.Write("GPU 渲染器待命（设备将在首帧采用）");
             }
             catch (Exception ex)
             {
@@ -316,11 +310,7 @@ public class ReceiverForm : Form
 
         _dec = new VideoDecoder(_url);
         _dec.SetCursorSprite(_cursorSprite, CursorW, CursorH);
-        if (_gpu != null)
-        {
-            _dec.Renderer = _gpu;
-            _dec.CreateDecoderHwRef = _gpu.CreateDecoderHwRef;
-        }
+        if (_gpu != null) _dec.Renderer = _gpu;
         _dec.FrameReady = OnFrameReady;   // 帧到即画（合并排队），消灭轮询节拍差
         _noFrameSince = DateTime.MinValue;
         _dec.Start();
@@ -717,5 +707,46 @@ internal static class Log
             }
         }
         catch { }
+    }
+}
+
+
+/// 原生崩溃最后防线：进程被段错误杀死前，记录异常代码和所在模块（故障定位的决定性证据）
+internal static class CrashGuard
+{
+    [DllImport("kernel32", SetLastError = true)]
+    private static extern IntPtr SetUnhandledExceptionFilter(IntPtr filter);
+    private delegate int FilterDelegate(IntPtr exceptionPointers);
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool GetModuleHandleEx(uint flags, IntPtr moduleName, out IntPtr module);
+    [DllImport("kernel32", CharSet = CharSet.Unicode)]
+    private static extern uint GetModuleFileName(IntPtr module, System.Text.StringBuilder name, uint size);
+
+    private static FilterDelegate? _kept;   // 防委托被 GC 回收
+
+    public static void Install()
+    {
+        _kept = Filter;
+        SetUnhandledExceptionFilter(Marshal.GetFunctionPointerForDelegate(_kept));
+    }
+
+    private static int Filter(IntPtr pointers)
+    {
+        try
+        {
+            var rec = Marshal.ReadIntPtr(pointers);
+            uint code = (uint)Marshal.ReadInt32(rec);
+            nint addr = Marshal.ReadIntPtr(rec, 16);
+            string module = "?";
+            if (GetModuleHandleEx(0x6, addr, out var mod) && mod != IntPtr.Zero)
+            {
+                var sb = new System.Text.StringBuilder(1024);
+                GetModuleFileName(mod, sb, 1024);
+                module = sb.ToString();
+            }
+            Log.Write($"💥 原生崩溃 code=0x{code:X8} @ 0x{(ulong)addr:X} 模块=[{module}]");
+        }
+        catch { }
+        return 0;   // 交回系统默认处理（进程退出），我们不掩盖
     }
 }
