@@ -25,8 +25,8 @@ public sealed unsafe class VideoDecoder : IDisposable
     int _videoIndex = -1;
     int _srcFormat = -1;
     int _consecSendErr;
-    // 进程级硬件解码熔断：驱动不配合时自动退回软解，不再反复尝试
-    private static bool _hwDisabled;
+    // 硬解熔断（实例级）：驱动不配合时本次解码器退回软解；新连接重新尝试
+    private bool _hwDisabled;
 
     IntPtr _bgra = IntPtr.Zero;
     int _w, _h;
@@ -53,6 +53,7 @@ public sealed unsafe class VideoDecoder : IDisposable
     public GpuVideoRenderer? Renderer;
     /// 渲染器提供的 D3D11VA 设备引用工厂（解码纹理与渲染同设备的关键）
     public Func<IntPtr>? CreateDecoderHwRef;
+    private readonly Action<string> _log;
     /// GPU 上屏连续失败（Form 据此切换状态显示；解码继续走 CPU 下载路径）
     public volatile bool GpuFailed;
     public bool IsGpuRendering => Renderer != null && !GpuFailed;
@@ -76,7 +77,7 @@ public sealed unsafe class VideoDecoder : IDisposable
         ffmpeg.avformat_network_init();
     }
 
-    public VideoDecoder(string url) { _url = url; }
+    public VideoDecoder(string url) { _url = url; _log = m => Log.Write(m); }
 
     public void Start()
     {
@@ -122,16 +123,25 @@ public sealed unsafe class VideoDecoder : IDisposable
         AVDictionary* opts = null;
         ffmpeg.av_dict_set(&opts, "fflags", "nobuffer", 0);
         ffmpeg.av_dict_set(&opts, "flags", "low_delay", 0);
-        ffmpeg.av_dict_set(&opts, "probesize", "65536", 0);
-        ffmpeg.av_dict_set(&opts, "analyzeduration", "0", 0);
+        ffmpeg.av_dict_set(&opts, "probesize", "131072", 0);
+        ffmpeg.av_dict_set(&opts, "analyzeduration", "500000", 0);
         ffmpeg.av_dict_set(&opts, "rw_timeout", "5000000", 0);   // 5s，防止半开 TCP 卡死解码线程
         // 不强制指定封装：自动探测 H.264/HEVC 裸流（Mac 端 --codec 决定）
         int ret = ffmpeg.avformat_open_input(&fmt, _url, null, &opts);
         ffmpeg.av_dict_free(&opts);
-        if (ret < 0) { _fmt = null; return false; }
+        if (ret < 0)
+        {
+            _log($"解码器: 打开流失败 err={ret}");
+            _fmt = null;
+            return false;
+        }
         _fmt = fmt;
 
-        if (ffmpeg.avformat_find_stream_info(_fmt, null) < 0) return false;
+        if (ffmpeg.avformat_find_stream_info(_fmt, null) < 0)
+        {
+            _log("解码器: find_stream_info 失败");
+            return false;
+        }
         _videoIndex = ffmpeg.av_find_best_stream(_fmt, AVMediaType.AVMEDIA_TYPE_VIDEO, -1, -1, null, 0);
         if (_videoIndex < 0) return false;
 
@@ -185,6 +195,7 @@ public sealed unsafe class VideoDecoder : IDisposable
 
         AVDictionary* dopts = null;
         ffmpeg.av_dict_set(&dopts, "flags", "low_delay", 0);
+        _log($"解码器: 打开 ({(hwAttached ? "硬件" : "软解")})");
         int openRet = ffmpeg.avcodec_open2(_dec, codec, &dopts);
         if (openRet < 0 && hwAttached)
         {
@@ -200,6 +211,7 @@ public sealed unsafe class VideoDecoder : IDisposable
         _frame = ffmpeg.av_frame_alloc();
         _swFrame = ffmpeg.av_frame_alloc();
         _pkt = ffmpeg.av_packet_alloc();
+        _log($"解码器: 就绪 {_dec->width}x{_dec->height} 线程={_dec->thread_count}");
         return true;
     }
 
@@ -208,8 +220,10 @@ public sealed unsafe class VideoDecoder : IDisposable
         var pkt = _pkt;
         long lastSeen = _frameCount;
         var stallStart = DateTime.UtcNow;
+        bool firstPacketLogged = false;
         while (_running && ffmpeg.av_read_frame(_fmt, pkt) >= 0)
         {
+            if (!firstPacketLogged) { firstPacketLogged = true; _log("解码器: 收到首包"); }
             try
             {
                 if (pkt->stream_index == _videoIndex)
@@ -231,6 +245,7 @@ public sealed unsafe class VideoDecoder : IDisposable
                                     lock (_sync) { _w = _frame->width; _h = _frame->height; }
                                     _gpuFailCount = 0;
                                     _frameCount++;
+                                    if (_frameCount == 1) _log($"解码器: GPU 首帧已出 {_w}x{_h}");
                                     FrameReady?.Invoke();
                                     continue;
                                 }
@@ -258,8 +273,9 @@ public sealed unsafe class VideoDecoder : IDisposable
 
             // 卡死自愈：网络在来包但 6 秒解不出新帧（任何原因的解码器僵死）→ 跳出重开
             if (_frameCount != lastSeen) { lastSeen = _frameCount; stallStart = DateTime.UtcNow; }
-            else if ((DateTime.UtcNow - stallStart).TotalSeconds > 6) break;
+            else if ((DateTime.UtcNow - stallStart).TotalSeconds > 6) { _log("解码器: 6 秒无新帧，重建"); break; }
         }
+        _log($"解码器: 读循环退出 (running={_running})");
     }
 
     /// 解码帧 → BGRA 原生缓冲（渲染端 StretchDIBits 直接用）。硬解帧先下载到内存
@@ -299,6 +315,7 @@ public sealed unsafe class VideoDecoder : IDisposable
 
             _frameCount++;
         }
+        if (_frameCount == 1) _log($"解码器: 首帧已出 {w}x{h}");
         FrameReady?.Invoke();
     }
 
