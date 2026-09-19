@@ -52,7 +52,7 @@ final class ControlServer: @unchecked Sendable {
     /// 60Hz 光标回报：只在坐标变化时发包，客户端本地绘制（0ms 感知延迟的关键）
     private func startCursorTimer() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: 0.016)
+        t.schedule(deadline: .now(), repeating: 0.008)
         t.setEventHandler { [weak self] in
             guard let self, !self.conns.isEmpty, let p = self.cursorProvider else { return }
             let c = p()

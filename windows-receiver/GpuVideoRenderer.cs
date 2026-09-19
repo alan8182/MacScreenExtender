@@ -80,6 +80,15 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private int _pendW, _pendH;
     private int _srcW = -1, _srcH = -1;
     private bool _bltLogged, _cursorLogged;
+    private bool _localActive;
+    private long _localLastSeen;
+    private float _localNx, _localNy;
+
+    // 合成节奏仪表
+    private long _presCount, _d2dErr;
+    private double _presMinMs = double.MaxValue, _presMaxMs;
+    private long _lastPresTs; private long _lastGaugeTs;
+    private int _srcLocal, _srcReport, _srcHidden;
 
     public GpuVideoRenderer(Action<string> log) { _log = log; }
 
@@ -279,15 +288,49 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             if (_swapChain == null || _videoTex == null || _backBuffer == null || _context == null) return;
             _context.CopyResource(_backBuffer, _videoTex);
 
+            // 光标源粘滞：本地位置 500ms 内出现过就坚持用本地（避免两源来回切换产生跳跃）
             float cnx, cny; bool cvis;
             var local = _localProvider?.Invoke();
-            if (local.HasValue) { cnx = local.Value.nx; cny = local.Value.ny; cvis = true; }
+            if (local.HasValue)
+            {
+                _localLastSeen = Environment.TickCount64;
+                _localNx = local.Value.nx; _localNy = local.Value.ny;
+                _localActive = true;
+            }
+            else if (_localActive && Environment.TickCount64 - _localLastSeen > 500)
+            {
+                _localActive = false;
+            }
+            if (_localActive) { cnx = _localNx; cny = _localNy; cvis = true; }
             else lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
             if (cvis) DrawCursor(_lastDx, _lastDy, _lastDw, _lastDh, cnx, cny);
 
             _swapChain.Present(1, PresentFlags.None);
+
+            var now = Environment.TickCount64;
+            if (_lastPresTs != 0)
+            {
+                var dt = now - _lastPresTs;
+                if (dt < _presMinMs) _presMinMs = dt;
+                if (dt > _presMaxMs) _presMaxMs = dt;
+                _presCount++;
+            }
+            _lastPresTs = now;
+            if (local.HasValue) _srcLocal++; else if (cvis) _srcReport++; else _srcHidden++;
+            if (now - _lastGaugeTs > 5000)
+            {
+                if (_presCount > 0)
+                    _log($"GPU 合成: {_presCount / 5.0:F0}fps 间隔 {_presMinMs:F1}-{_presMaxMs:F1}ms | 光标源 本地:{_srcLocal / 5} 回报:{_srcReport / 5} 隐藏:{_srcHidden / 5} D2D错:{_d2dErr}");
+                _presCount = 0; _presMinMs = double.MaxValue; _presMaxMs = 0;
+                _srcLocal = _srcReport = _srcHidden = 0;
+                _lastGaugeTs = now;
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _d2dErr++;
+            if (_d2dErr % 20 == 1) _log($"GPU: 合成异常 {_d2dErr} 次: {ex.Message}");
+        }
     }
 
     public void UpdateCursor(float nx, float ny, bool visible)
