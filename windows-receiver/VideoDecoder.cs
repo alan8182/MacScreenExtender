@@ -246,7 +246,7 @@ public sealed unsafe class VideoDecoder : IDisposable
                                     FrameReady?.Invoke();
                                     continue;
                                 }
-                                if (++_gpuFailCount > 50) GpuFailed = true;   // 熔断回 CPU 路径
+                                if (++_gpuFailCount > 300) GpuFailed = true;   // 容忍初始探测期的失败，300 帧（约 5-15 秒）仍全败才熔断
                                 ConvertAndStore(_frame);
                             }
                             else
