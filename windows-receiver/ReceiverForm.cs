@@ -294,7 +294,6 @@ public class ReceiverForm : Form
             {
                 _gpu = new GpuVideoRenderer(Log.Write);
                 _gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height));
-                _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
                 Log.Write("GPU 渲染器待命（设备将在首帧采用）");
             }
             catch (Exception ex)
@@ -309,19 +308,12 @@ public class ReceiverForm : Form
         }
 
         _dec = new VideoDecoder(_url);
-        _dec.SetCursorSprite(_cursorSprite, CursorW, CursorH);
         if (_gpu != null)
         {
             _dec.Renderer = _gpu;
             // 设备提供者：渲染器从解码器取硬解设备指针（之前漏接导致 E_NOINTERFACE 死循环）
             _gpu.DeviceProvider = () => _dec?.HwD3DDevice ?? IntPtr.Zero;
             // 光标本地渲染：Windows 鼠标实时位置（0ms），Mac 回报仅作非控制态兜底
-            _gpu.LocalCursorProvider = () =>
-            {
-                if (_forwarder != null && ControlActive() && _forwarder.TryGetLocalCursor(out var lx, out var ly))
-                    return (lx, ly, true);
-                return null;
-            };
         }
         _dec.FrameReady = OnFrameReady;   // 帧到即画（合并排队），消灭轮询节拍差
         _noFrameSince = DateTime.MinValue;
@@ -364,7 +356,7 @@ public class ReceiverForm : Form
                 _oldImc = ImmAssociateContext(Handle, IntPtr.Zero);   // 禁本机 IME，输入全交 Mac
                 _forwarder?.Dispose();
                 _forwarder = new InputForwarder(ControlActive, SendPacket, _screenW, _screenH);
-                Cursor.Hide();
+                // 系统光标保持可见：它就是零延迟光标层（Windows 渲染，跟随手部零延迟）
             }
             if (wasWindowed && _status.Text != "已连接") _status.Text = "已连接";
         }
@@ -456,11 +448,6 @@ public class ReceiverForm : Form
     void HandleCtlPacket(byte[] p, int off)
     {
         if (p[off] != 8) return;   // 7=心跳（已在读循环刷新 keepalive）
-        float nx = BitConverter.ToSingle(p, off + 4);
-        float ny = BitConverter.ToSingle(p, off + 8);
-        bool vis = p[off + 12] != 0;
-        _dec?.UpdateCursor(nx, ny, vis);        // CPU 路径：混入解码帧
-        _gpu?.UpdateCursor(nx, ny, vis);        // GPU 路径：合成循环实时读取
 
         // 输入回路延迟估算：本次光标回报反映的是最后一次注入的移动
         var fw = _forwarder;
@@ -549,6 +536,7 @@ public class ReceiverForm : Form
     {
         base.OnResize(e);
         _gpu?.RequestResize(Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height));
+
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -561,7 +549,6 @@ public class ReceiverForm : Form
                 if (_oldImc != IntPtr.Zero) ImmAssociateContext(Handle, _oldImc);
                 FormBorderStyle = FormBorderStyle.Sizable;
                 WindowState = FormWindowState.Normal;
-                Cursor.Show();
             }
             else
             {

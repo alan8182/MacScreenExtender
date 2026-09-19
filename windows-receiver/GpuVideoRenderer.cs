@@ -4,7 +4,6 @@ using System.Threading;
 using FFmpeg.AutoGen;
 using SharpGen.Runtime;
 using Vortice;
-using Vortice.Direct2D1;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -24,17 +23,13 @@ using D3D11OutputViewT = Vortice.Direct3D11.ID3D11VideoProcessorOutputView;
 using D3D11RtvT = Vortice.Direct3D11.ID3D11RenderTargetView;
 using D3D11InputViewT = Vortice.Direct3D11.ID3D11VideoProcessorInputView;
 using DxgiSwapChainT = Vortice.DXGI.IDXGISwapChain1;
-using DxgiSurfaceT = Vortice.DXGI.IDXGISurface;
-using FeatureLevelT = Vortice.Direct3D.FeatureLevel;
-using InterpModeT = Vortice.Direct2D1.InterpolationMode;
-using D2DPixelFmtT = Vortice.DCommon.PixelFormat;
-using D2DAlphaT = Vortice.DCommon.AlphaMode;
 
 /// <summary>
 /// GPU 渲染直通：d3d11va 解码帧（NV12 纹理）→ ID3D11VideoProcessor 转 BGRA
-/// → 交换链垂直同步上屏，全程不落内存。光标精灵经 D2D 叠画。
-/// 任一步失败返回 false，调用方累计后回退 CPU 路径（下载+sws+GDI，完整保留）。
-/// 所有渲染调用发生在解码线程（单线程化）；UI 线程仅 RequestResize（帧首应用）。
+/// → 交换链垂直同步上屏，全程不落内存。
+/// 光标由 Windows 系统光标承担（不隐藏），渲染器只负责视频画面。
+/// 专用合成线程以 Present(1) 锁定显示器刷新率。
+/// 任一步失败返回 false，调用方累计后回退 CPU 路径（完整保留）。
 /// </summary>
 public sealed unsafe class GpuVideoRenderer : IDisposable
 {
@@ -48,50 +43,23 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private D3D11ProcEnumT? _procEnum;
     private D3D11ProcessorT? _processor;
     private D3D11OutputViewT? _outputView;
-    private ID2D1Factory1? _d2dFactory;
-    private ID2D1Device? _d2dDevice;
-    private ID2D1DeviceContext? _d2dContext;
-    private ID2D1Bitmap1? _d2dTarget;
-    private ID2D1Bitmap1? _cursorD2d;
-    private AVBufferRef* _hwRef;
-    private D3D11Texture2DT? _videoTex;             // 解码帧的 GPU 持久副本（含黑边）
-    private ID3D11VideoProcessorOutputView? _videoOutView;
-    private ID3D11RenderTargetView? _videoRtv;
+    private D3D11Texture2DT? _videoTex;
+    private D3D11RtvT? _videoRtv;
     private D3D11Texture2DT? _backBuffer;
-    private int _lastDx, _lastDy, _lastDw = 1, _lastDh = 1;
-
-    // 光标状态（Mac 回报，作为本地位置不可用时的兜底）
-    private readonly object _cursorLock = new();
-    private float _curNx, _curNy;
-    private bool _curVisible;
+    private IntPtr _hwnd;
+    private nint _devicePtr;
+    private int _swapW, _swapH;
+    private volatile bool _resizePending;
+    private int _pendW, _pendH;
+    private int _srcW = -1, _srcH = -1;
+    private bool _bltLogged;
 
     // 专用合成线程：Present(1) 自动锁定显示器刷新率（120Hz 屏 = 120 次合成/秒）
     private Thread? _composeThread;
     private volatile bool _composeRunning;
-    /// 本地光标提供者（控制中返回 Windows 鼠标实时位置，0ms 延迟）
-    public Func<(float nx, float ny, bool vis)?>? LocalCursorProvider;
+
     /// 设备提供者：返回解码器硬解设备的 ID3D11Device 原生指针
     public Func<IntPtr>? DeviceProvider;
-    private Func<(float nx, float ny, bool vis)?>? _localProvider;
-
-    private IntPtr _hwnd;
-    private nint _devicePtr;
-    private int _swapW, _swapH;
-    private int _spriteW, _spriteH;
-    private (byte[] px, int w, int h)? _pendingCursor;
-    private volatile bool _resizePending;
-    private int _pendW, _pendH;
-    private int _srcW = -1, _srcH = -1;
-    private bool _bltLogged, _cursorLogged;
-    private bool _localActive;
-    private long _localLastSeen;
-    private float _localNx, _localNy;
-
-    // 合成节奏仪表
-    private long _presCount, _d2dErr;
-    private double _presMinMs = double.MaxValue, _presMaxMs;
-    private long _lastPresTs; private long _lastGaugeTs;
-    private int _srcLocal, _srcReport, _srcHidden;
 
     public GpuVideoRenderer(Action<string> log) { _log = log; }
 
@@ -104,8 +72,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _log($"GPU: 渲染器待命（窗口 {_swapW}x{_swapH}，等待解码设备）");
     }
 
-    /// 从解码帧上采用设备（解码纹理属于它），并搭建整条渲染管线
-    /// 从解码帧上采用设备（解码纹理属于它），并搭建整条渲染管线
     private bool EnsureDevice()
     {
         nint devPtr = DeviceProvider?.Invoke() ?? IntPtr.Zero;
@@ -126,7 +92,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             mt.SetMultithreadProtected(true);
 
             using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
-            using var factory = adapterGetParent(dxgiDevice);
+            using var factory = GetDxgiFactory(dxgiDevice);
             _log("GPU: DXGI 工厂就绪");
 
             var scDesc = new SwapChainDescription1
@@ -157,11 +123,8 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             SetColorSpace();
 
             RecreateTargets();
-            if (_outputView == null || _rtv == null) return false;
+            if (_outputView == null || _rtv == null || _videoTex == null) return false;
 
-            _d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(FactoryType.SingleThreaded);
-            _d2dDevice = _d2dFactory.CreateDevice(dxgiDevice);
-            _d2dContext = _d2dDevice.CreateDeviceContext(DeviceContextOptions.None);
             _log("GPU: 渲染管线全就绪");
             StartComposeLoop();
             return true;
@@ -174,31 +137,10 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         }
     }
 
-    private static IDXGIFactory2 adapterGetParent(IDXGIDevice dxgiDevice)
+    private static IDXGIFactory2 GetDxgiFactory(IDXGIDevice dxgiDevice)
     {
         using var adapter = dxgiDevice.GetAdapter();
         return adapter.GetParent<IDXGIFactory2>();
-    }
-
-    private void TeardownDevice()
-    {
-        _outputView?.Dispose(); _outputView = null;
-        _rtv?.Dispose(); _rtv = null;
-        _d2dTarget?.Dispose(); _d2dTarget = null;
-        _d2dContext?.Dispose(); _d2dContext = null;
-        _d2dDevice?.Dispose(); _d2dDevice = null;
-        _d2dFactory?.Dispose(); _d2dFactory = null;
-        _processor?.Dispose(); _processor = null;
-        _procEnum?.Dispose(); _procEnum = null;
-        _videoDevice?.Dispose(); _videoDevice = null;
-        _videoContext?.Dispose(); _videoContext = null;
-        _swapChain?.Dispose(); _swapChain = null;
-        _videoTex?.Dispose(); _videoTex = null;
-        _videoRtv?.Dispose(); _videoRtv = null;
-        _backBuffer?.Dispose(); _backBuffer = null;
-        _context?.Dispose(); _context = null;
-        _device?.Dispose(); _device = null;
-        _devicePtr = IntPtr.Zero;
     }
 
     private D3D11ProcEnumT? CreateProcEnum(int w, int h)
@@ -215,13 +157,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             OutputHeight = (uint)h,
             Usage = VideoUsage.PlaybackNormal,
         };
-        var penum = _videoDevice.CreateVideoProcessorEnumerator(desc);
-        if (penum == null)
-        {
-            _log("GPU: ProcessorEnum 创建失败");
-            return null;
-        }
-        return penum;
+        return _videoDevice.CreateVideoProcessorEnumerator(desc);
     }
 
     private void SetColorSpace()
@@ -232,21 +168,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         var outCs = new VideoProcessorColorSpace { Usage = 0, RGB_Range = 0 };
         _videoContext.VideoProcessorSetStreamColorSpace(_processor, 0u, inCs);
         _videoContext.VideoProcessorSetOutputColorSpace(_processor, outCs);
-    }
-
-    public void SetCursorSprite(byte[] bgra, int w, int h)
-    {
-        // 跨线程安全：只存内存，帧渲染时惰性建 GPU 资源
-        _pendingCursor = (bgra, w, h);
-        _cursorD2d = null;
-    }
-
-    public void RequestResize(int w, int h)
-    {
-        if (w <= 0 || h <= 0) return;
-        if (w == _swapW && h == _swapH) return;
-        _pendW = w; _pendH = h;
-        _resizePending = true;
     }
 
     /// 解码线程：把硬件解码帧转 BGRA 并缩放/加黑边到持久视频纹理（不直接上屏）
@@ -280,11 +201,10 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             int dh = Math.Max(1, (int)(srcH * s));
             int dx = (_swapW - dw) / 2;
             int dy = (_swapH - dh) / 2;
-            _lastDx = dx; _lastDy = dy; _lastDw = dw; _lastDh = dh;
 
             _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
                 new RawRect(dx, dy, dx + dw, dy + dh));
-            _videoContext.VideoProcessorBlt(_processor, _videoOutView, 0u, new[] { stream(0, 0, srcW, srcH, inView) });
+            _videoContext.VideoProcessorBlt(_processor, _outputView, 0u, new[] { stream(0, 0, srcW, srcH, inView) });
             return true;
         }
         catch (Exception ex)
@@ -299,6 +219,18 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
             new RawRect(sx, sy, sx + sw, sy + sh));
         return new VideoProcessorStream { Enable = true, InputSurface = inView };
+    }
+
+    /// 合成一帧：视频纹理拷到后备缓冲 + 垂直同步上屏（光标由 Windows 系统承担）
+    public void Compose()
+    {
+        try
+        {
+            if (_swapChain == null || _videoTex == null || _backBuffer == null || _context == null) return;
+            _context.CopyResource(_backBuffer, _videoTex);
+            _swapChain.Present(1, PresentFlags.None);
+        }
+        catch { }
     }
 
     private void StartComposeLoop()
@@ -318,91 +250,12 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         }
     }
 
-    /// 合成一帧：视频纹理 → 后备缓冲 → 光标（本地位置优先）→ 垂直同步上屏
-    public void Compose()
+    public void RequestResize(int w, int h)
     {
-        try
-        {
-            if (_swapChain == null || _videoTex == null || _backBuffer == null || _context == null) return;
-            _context.CopyResource(_backBuffer, _videoTex);
-
-            // 光标源粘滞：本地位置 500ms 内出现过就坚持用本地（避免两源来回切换产生跳跃）
-            float cnx, cny; bool cvis;
-            var local = _localProvider?.Invoke();
-            if (local.HasValue)
-            {
-                _localLastSeen = Environment.TickCount64;
-                _localNx = local.Value.nx; _localNy = local.Value.ny;
-                _localActive = true;
-            }
-            else if (_localActive && Environment.TickCount64 - _localLastSeen > 500)
-            {
-                _localActive = false;
-            }
-            if (_localActive) { cnx = _localNx; cny = _localNy; cvis = true; }
-            else lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
-            if (cvis) DrawCursor(_lastDx, _lastDy, _lastDw, _lastDh, cnx, cny);
-
-            _swapChain.Present(1, PresentFlags.None);
-
-            var now = Environment.TickCount64;
-            if (_lastPresTs != 0)
-            {
-                var dt = now - _lastPresTs;
-                if (dt < _presMinMs) _presMinMs = dt;
-                if (dt > _presMaxMs) _presMaxMs = dt;
-                _presCount++;
-            }
-            _lastPresTs = now;
-            if (local.HasValue) _srcLocal++; else if (cvis) _srcReport++; else _srcHidden++;
-            if (now - _lastGaugeTs > 5000)
-            {
-                if (_presCount > 0)
-                    _log($"GPU 合成: {_presCount / 5.0:F0}fps 间隔 {_presMinMs:F1}-{_presMaxMs:F1}ms | 光标源 本地:{_srcLocal / 5} 回报:{_srcReport / 5} 隐藏:{_srcHidden / 5} D2D错:{_d2dErr}");
-                _presCount = 0; _presMinMs = double.MaxValue; _presMaxMs = 0;
-                _srcLocal = _srcReport = _srcHidden = 0;
-                _lastGaugeTs = now;
-            }
-        }
-        catch (Exception ex)
-        {
-            _d2dErr++;
-            if (_d2dErr % 20 == 1) _log($"GPU: 合成异常 {_d2dErr} 次: {ex.Message}");
-        }
-    }
-
-    public void UpdateCursor(float nx, float ny, bool visible)
-    {
-        lock (_cursorLock) { _curNx = nx; _curNy = ny; _curVisible = visible; }
-    }
-
-    private void DrawCursor(float dx, float dy, float dw, float dh, float nx, float ny)
-    {
-        EnsureCursorTexture();
-        if (_cursorD2d == null || _d2dContext == null || _d2dTarget == null) return;
-        float scale = Math.Max(1.2f, dw / 1600f);
-        float cx = dx + nx * dw, cy = dy + ny * dh;
-        _d2dContext.Target = _d2dTarget;
-        if (!_cursorLogged) { _cursorLogged = true; _log("GPU: 首次 D2D 光标绘制"); }
-        _d2dContext.BeginDraw();
-        _d2dContext.DrawBitmap(_cursorD2d,
-            new RawRectF(cx, cy, cx + _spriteW * scale, cy + _spriteH * scale),
-            1f, InterpModeT.Linear, null, null);
-        _d2dContext.EndDraw();
-    }
-
-    private void EnsureCursorTexture()
-    {
-        if (_cursorD2d != null || _pendingCursor == null || _d2dContext == null) return;
-        var (px, w, h) = _pendingCursor.Value;
-        var props = new BitmapProperties1(
-            new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Premultiplied), 96f, 96f);
-        fixed (byte* p = px)
-        {
-            var size = new SizeI(w, h);
-            _cursorD2d = _d2dContext.CreateBitmap(size, (nint)p, (uint)(w * 4), props);
-        }
-        _pendingCursor = null;
+        if (w <= 0 || h <= 0) return;
+        if (w == _swapW && h == _swapH) return;
+        _pendW = w; _pendH = h;
+        _resizePending = true;
     }
 
     private void ApplyPendingResize()
@@ -420,22 +273,21 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         RecreateTargets();
     }
 
-    /// 重建依赖交换链后备缓冲的资源（RTV / 输出视图 / D2D 目标）
+    /// 重建依赖交换链后备缓冲的资源（RTV / 持久视频纹理 / 输出视图）
     private void RecreateTargets()
     {
         _outputView?.Dispose(); _outputView = null;
         _rtv?.Dispose(); _rtv = null;
-        _d2dTarget?.Dispose(); _d2dTarget = null;
+        _videoRtv?.Dispose(); _videoRtv = null;
+        _videoTex?.Dispose(); _videoTex = null;
+        _backBuffer?.Dispose(); _backBuffer = null;
         if (_swapChain == null || _device == null || _videoDevice == null || _procEnum == null) return;
 
         using var backBuffer = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
-        _backBuffer?.Dispose();
         _backBuffer = new D3D11Texture2DT(backBuffer.NativePointer);
+        _rtv = _device.CreateRenderTargetView(backBuffer, null);
 
         // 持久视频纹理（BGRA，含黑边）
-        _videoOutView?.Dispose(); _videoOutView = null;
-        _videoRtv?.Dispose(); _videoRtv = null;
-        _videoTex?.Dispose(); _videoTex = null;
         var vtDesc = new Texture2DDescription
         {
             Width = (uint)_swapW, Height = (uint)_swapH, MipLevels = 1, ArraySize = 1,
@@ -447,59 +299,32 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         {
             ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
         };
-        _videoOutView = _videoDevice.CreateVideoProcessorOutputView(_videoTex, _procEnum, vtOutDesc);
+        _outputView = _videoDevice.CreateVideoProcessorOutputView(_videoTex, _procEnum, vtOutDesc);
         _videoRtv = _device.CreateRenderTargetView(_videoTex, null);
         _context.ClearRenderTargetView(_videoRtv, new Color4(0, 0, 0, 1));
+    }
 
-        _rtv = _device.CreateRenderTargetView(backBuffer, null);
-        var outDesc = new VideoProcessorOutputViewDescription
-        {
-            ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
-        };
-        _outputView = _videoDevice.CreateVideoProcessorOutputView(backBuffer, _procEnum, outDesc);
-        if (_outputView == null) _log("GPU: OutputView 创建失败");
-
-        if (_d2dContext != null)
-        {
-            try
-            {
-                using var surface = backBuffer.QueryInterface<DxgiSurfaceT>();
-                var props = new BitmapProperties1(
-                    new D2DPixelFmtT(Format.B8G8R8A8_UNorm, D2DAlphaT.Premultiplied), 96f, 96f);
-                _d2dTarget = _d2dContext.CreateBitmapFromDxgiSurface(surface, props);
-                _log("GPU: D2D 目标就绪");
-            }
-            catch (Exception ex)
-            {
-                _log($"GPU: D2D 目标创建失败（光标停用，视频不受影响）: {ex.Message}");
-                _d2dTarget = null;
-            }
-        }
+    private void TeardownDevice()
+    {
+        _outputView?.Dispose(); _outputView = null;
+        _rtv?.Dispose(); _rtv = null;
+        _videoRtv?.Dispose(); _videoRtv = null;
+        _videoTex?.Dispose(); _videoTex = null;
+        _backBuffer?.Dispose(); _backBuffer = null;
+        _processor?.Dispose(); _processor = null;
+        _procEnum?.Dispose(); _procEnum = null;
+        _videoDevice?.Dispose(); _videoDevice = null;
+        _videoContext?.Dispose(); _videoContext = null;
+        _swapChain?.Dispose(); _swapChain = null;
+        _context?.Dispose(); _context = null;
+        _device?.Dispose(); _device = null;
+        _devicePtr = IntPtr.Zero;
     }
 
     public void Dispose()
     {
         _composeRunning = false;
         try { _composeThread?.Join(1000); } catch { }
-        _outputView?.Dispose();
-        _rtv?.Dispose();
-        _d2dTarget?.Dispose();
-        _cursorD2d?.Dispose();
-        _d2dContext?.Dispose();
-        _d2dDevice?.Dispose();
-        _d2dFactory?.Dispose();
-        _processor?.Dispose();
-        _procEnum?.Dispose();
-        _videoDevice?.Dispose();
-        _videoContext?.Dispose();
-        _swapChain?.Dispose();
-        _context?.Dispose();
-        _device?.Dispose();
-        if (_hwRef != default)
-        {
-            var hw = _hwRef;
-            ffmpeg.av_buffer_unref(&hw);
-            _hwRef = default;
-        }
+        TeardownDevice();
     }
 }
