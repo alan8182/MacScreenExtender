@@ -1,0 +1,313 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1001 /* MacScreenReceiverApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2001 /* MacScreenReceiverApp.swift */; };
+		1002 /* DiscoveredMac.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2002 /* DiscoveredMac.swift */; };
+		1003 /* ReceiverConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2003 /* ReceiverConfig.swift */; };
+		1004 /* DiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2004 /* DiscoveryService.swift */; };
+		1005 /* VideoStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2005 /* VideoStreamClient.swift */; };
+		1006 /* ControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2006 /* ControlClient.swift */; };
+		1007 /* NALUParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2007 /* NALUParser.swift */; };
+		1008 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2008 /* ContentView.swift */; };
+		1009 /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2009 /* ConnectionView.swift */; };
+		1010 /* DisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2010 /* DisplayView.swift */; };
+		1011 /* PairSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2011 /* PairSheet.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0001 /* MacScreenReceiver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacScreenReceiver.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2001 /* MacScreenReceiverApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScreenReceiverApp.swift; sourceTree = "<group>"; };
+		2002 /* DiscoveredMac.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveredMac.swift; sourceTree = "<group>"; };
+		2003 /* ReceiverConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiverConfig.swift; sourceTree = "<group>"; };
+		2004 /* DiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryService.swift; sourceTree = "<group>"; };
+		2005 /* VideoStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoStreamClient.swift; sourceTree = "<group>"; };
+		2006 /* ControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlClient.swift; sourceTree = "<group>"; };
+		2007 /* NALUParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NALUParser.swift; sourceTree = "<group>"; };
+		2008 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		2009 /* ConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionView.swift; sourceTree = "<group>"; };
+		2010 /* DisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayView.swift; sourceTree = "<group>"; };
+		2011 /* PairSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairSheet.swift; sourceTree = "<group>"; };
+		2012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4001 = {
+			isa = PBXGroup;
+			children = (
+				4002 /* MacScreenReceiver */,
+				4003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4002 /* MacScreenReceiver */ = {
+			isa = PBXGroup;
+			children = (
+				2001 /* MacScreenReceiverApp.swift */,
+				4004 /* Models */,
+				4005 /* Services */,
+				4006 /* Views */,
+				2012 /* Info.plist */,
+			);
+			path = MacScreenReceiver;
+			sourceTree = "<group>";
+		};
+		4003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				0001 /* MacScreenReceiver.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				2002 /* DiscoveredMac.swift */,
+				2003 /* ReceiverConfig.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		4005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				2004 /* DiscoveryService.swift */,
+				2005 /* VideoStreamClient.swift */,
+				2006 /* ControlClient.swift */,
+				2007 /* NALUParser.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		4006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				2008 /* ContentView.swift */,
+				2009 /* ConnectionView.swift */,
+				2010 /* DisplayView.swift */,
+				2011 /* PairSheet.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5001 /* MacScreenReceiver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6001 /* Build configuration list for PBXNativeTarget "MacScreenReceiver" */;
+			buildPhases = (
+				7001 /* Sources */,
+				3001 /* Frameworks */,
+				8001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacScreenReceiver;
+			productName = MacScreenReceiver;
+			productReference = 0001 /* MacScreenReceiver.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					5001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 6002 /* Build configuration list for PBXProject "MacScreenReceiver-iPad" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4001;
+			productRefGroup = 4003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5001 /* MacScreenReceiver */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1001 /* MacScreenReceiverApp.swift in Sources */,
+				1002 /* DiscoveredMac.swift in Sources */,
+				1003 /* ReceiverConfig.swift in Sources */,
+				1004 /* DiscoveryService.swift in Sources */,
+				1005 /* VideoStreamClient.swift in Sources */,
+				1006 /* ControlClient.swift in Sources */,
+				1007 /* NALUParser.swift in Sources */,
+				1008 /* ContentView.swift in Sources */,
+				1009 /* ConnectionView.swift in Sources */,
+				1010 /* DisplayView.swift in Sources */,
+				1011 /* PairSheet.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacScreenReceiver/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac 随航扩展";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecarx.macscreenreceiver.ipad;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "2";
+			};
+			name = Debug;
+		};
+		B002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacScreenReceiver/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac 随航扩展";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ecarx.macscreenreceiver.ipad;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6001 /* Build configuration list for PBXNativeTarget "MacScreenReceiver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B001 /* Debug */,
+				B002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6002 /* Build configuration list for PBXProject "MacScreenReceiver-iPad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A001 /* Debug */,
+				A002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9001 /* Project object */;
+}

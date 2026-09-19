@@ -1,8 +1,8 @@
-# MacScreenExtender — Mac ↔ Windows 高性能无线扩展屏
+# MacScreenExtender — Mac ↔ Windows / iPad 高性能无线扩展屏
 
 <p align="center">
-  <b>把任意一台 Windows 电脑（或平板）秒变 Mac 的超低延迟无线扩展屏</b><br>
-  全 GPU 硬件加速编解码 · 60/120fps 自适应高刷 · 控制端光标 0ms 跟手 · 极简现代卡片 UI · 4K 高分屏自适应
+  <b>把任意一台 Windows 电脑或 iPad 秒变 Mac 的超低延迟无线扩展屏</b><br>
+  全 GPU 硬件加速编解码 · 60/120fps 自适应高刷 · 控制端光标 0ms 跟手 · 突破 Apple ID 限制 · 4K 高分屏自适应
 </p>
 
 <p align="center">
@@ -13,15 +13,16 @@
 
 ## ✨ 核心特性
 
-- 🖥️ **原生虚拟扩展屏**：Mac 端创建真实存在的第二块虚拟显示器，分辨率与刷新率（支持 60Hz / 120Hz）自动与 Windows 显示器原生匹配。
+- 🖥️ **原生虚拟扩展屏**：Mac 端创建真实存在的第二块虚拟显示器，分辨率与刷新率（支持 60Hz / 120Hz）自动与 Windows / iPad 显示器原生匹配。
 - ⚡ **端到端全 GPU 渲染流水线**：
   - **Mac 发送端**：ScreenCaptureKit 帧采集 + VideoToolbox 硬件编码（H.264 / HEVC）；
-  - **Windows 接收端**：FFmpeg `d3d11va` 硬件解码 + Direct3D 11 硬件交换链合成上屏，CPU 占用仅 1%~5%。
-- 🖱️ **光标 0ms 跟手**：控制端指针由 Windows 系统原生绘制，无视频网络延迟带来的漂移与卡顿感。
-- ⌨️ **双端反向控制**：Windows 键盘、鼠标平滑控制 Mac，支持系统级快捷键、平滑滚动与动态键位映射。
-- 🎨 **现代原生极简卡片 UI**：全新浅色卡片视觉设计，原生支持 Windows `PerMonitorV2` 高 DPI 规范，在 1080p、2K、4K 及不同缩放比（100%~200%）下均保持舒展大气的排版与清晰度。
+  - **Windows 接收端**：FFmpeg `d3d11va` 硬件解码 + Direct3D 11 硬件交换链合成上屏，CPU 占用仅 1%~5%；
+  - **iPadOS 接收端**：原生 `AVSampleBufferDisplayLayer` 零拷贝硬件硬解，延迟低至 5~15ms，支持手势与 Apple Pencil。
+- 🍏 **突破 Apple ID 随航壁垒**：iPad 端支持任意账号（特别适合公司 Mac 企业号 + 个人 iPad）、支持老款不支持官方随航的 iPad 机型。
+- 🖱️ **光标 0ms 跟手**：控制端指针由接收端本地渲染，无视频网络延迟带来的漂移与卡顿感。
+- ⌨️ **双端反向控制**：Windows 键鼠 / iPad 触控及 Apple Pencil 平滑控制 Mac，支持平滑滚动与动态手势映射。
+- 🎨 **现代原生极简卡片 UI**：全新浅色卡片视觉设计，原生支持 Windows `PerMonitorV2` 高 DPI 规范（100%~200% 等比缩放）与 iPadOS 现代原生设计。
 - 📡 **局域网自动发现与 4 位配对鉴权**：UDP 局域网广播零配置发现设备，首次连接 4 位随机配对码握手生成持久化令牌，防局域网未授权窥屏。
-- 🔄 **工业级自愈保障**：控制通道自动心跳重连、解码死锁自检、分辨率动态热切换补偿、网络丢包 AIMD 动态码率自适应。
 - 🍎 **开箱即用公证分发**：支持使用 Apple 官方 Developer ID 签名并完成安全公证（Notarization & Stapling），生成任何 Mac 均可直接双击安装运行的 DMG 安装包。
 
 ---
@@ -32,6 +33,7 @@
 |---|---|---|
 | **Mac (发送端)** | macOS 13.0 (Ventura) 及更高版本 | Apple Silicon (M1/M2/M3/M4 系列芯片) |
 | **Windows (接收端)** | Windows 10 / 11 64-bit | 支持 DirectX 11 显卡，.NET 8 Desktop Runtime |
+| **iPad (接收端)** | iPadOS 16.0 及更高版本 | 支持任意 iPad（支持不同 Apple ID / 老款 iPad） |
 | **网络环境** | 同一局域网内通信 | 建议 5GHz Wi-Fi、Wi-Fi 6 或千兆有线网络 |
 
 ---
@@ -49,7 +51,12 @@
 - 首次连接时输入 Mac 菜单栏显示的 4 位配对码；
 - 收到首帧画面后自动进入全屏扩展屏模式！
 
-### 3. 常用控制快捷键（Windows 端）
+### 3. iPad 端（接收端）
+- 详见 [`ipad-receiver/README.md`](ipad-receiver/README.md)；
+- 使用 Xcode 打开 `ipad-receiver/MacScreenReceiver-iPad.xcodeproj` 直接运行到 iPad 上；
+- 自动发现局域网 Mac，输入配对码即可享受超低延迟触控扩展屏！
+
+### 4. 常用控制快捷键（Windows 端）
 | 快捷键 | 功能说明 |
 |---|---|
 | <kbd>Esc</kbd> | 退出全屏返回设置面板（窗口模式下再按关闭程序） |
