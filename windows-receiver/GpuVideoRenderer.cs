@@ -27,9 +27,11 @@ using FeatureLevelT = Vortice.Direct3D.FeatureLevel;
 /// <summary>
 /// GPU 渲染直通：d3d11va 解码帧（NV12 纹理）→ ID3D11VideoProcessor 缩放/转 BGRA
 /// → 交换链垂直同步上屏，全程不落内存。
-/// 分工：解码线程只保留帧引用；本类的专用合成线程做全部渲染并以 Present(1)
-/// 锁定显示器刷新率——空闲时自动休眠（GPU 零负载）。
-/// 光标由 Windows 系统承担（不隐藏）。任一步失败自动回退 CPU 路径（完整保留）。
+/// 线程模型（无争抢的关键）：
+///   解码线程 —— 只解码并保留帧引用，零 D3D 调用；
+///   合成线程（专用）—— 取保留帧，缩放转 BGRA 直写后备缓冲，Present(1) 锁定刷新率；
+///   空闲时休眠（GPU 零负载）。光标由 Windows 系统承担（不隐藏）。
+/// 任一步失败自动回退 CPU 路径（完整保留）。
 /// </summary>
 public sealed unsafe class GpuVideoRenderer : IDisposable
 {
@@ -37,8 +39,8 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private D3D11DeviceT? _device;
     private D3D11ContextT? _context;
     private DxgiSwapChainT? _swapChain;
-    private D3D11RtvT? _rtvBb;
-    private D3D11OutputViewT? _bbOutView;
+    private D3D11RtvT? _rtvBb;               // 后备缓冲清屏用
+    private D3D11OutputViewT? _bbOutView;    // 后备缓冲输出视图（合成 Blt 目标）
     private D3D11Texture2DT? _backBuffer;
     private D3D11VideoDeviceT? _videoDevice;
     private D3D11VideoContextT? _videoContext;
@@ -50,7 +52,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private volatile bool _resizePending;
     private int _pendW, _pendH;
     private int _srcW = -1, _srcH = -1;
-    private bool _bltLogged, _vtLogged;
+    private bool _bltLogged;
 
     private VideoDecoder? _src;
     private Thread? _composeThread;
@@ -173,7 +175,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _videoContext.VideoProcessorSetOutputColorSpace(_processor, outCs);
     }
 
-    /// 合成线程主循环：有新帧→缩放合成→垂直同步上屏；无新帧→休眠（GPU 零负载）
     private void StartComposeLoop()
     {
         if (_composeThread != null) return;
@@ -190,6 +191,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _resizePending = true;
     }
 
+    /// 合成线程主循环：有新帧→缩放合成→垂直同步上屏；无新帧→休眠（GPU 零负载）
     private void ComposeLoop()
     {
         while (_composeRunning)
@@ -208,40 +210,44 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 if (!EnsureDevice()) { Thread.Sleep(100); continue; }
                 if (_resizePending) ApplyPendingResize();
 
+                bool rendered = false;
                 // 取帧 + 建视图 + Blt 同锁原子完成：保留帧的纹理归解码器池所有，
                 // 若中途换帧释放，池会回收复用该表面，Blt 会读到失效/被覆写的内容（黑屏）
                 lock (src.HwSync)
                 {
-                    if (!src.TryGetGpuFrameRaw(out var f)) continue;
-
-                    var tex = new D3D11Texture2DT((nint)f->data[0]);
-                    int slice = (int)(nint)f->data[1];
-                    var inDesc = new VideoProcessorInputViewDescription
+                    if (src.TryGetGpuFrameRaw(out var f))
                     {
-                        ViewDimension = VideoProcessorInputViewDimension.Texture2D,
-                        Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = (uint)slice },
-                    };
-                    using var inView = _videoDevice.CreateVideoProcessorInputView(tex, _procEnum, inDesc);
-                    if (inView == null) { _log("GPU: InputView 创建失败"); continue; }
+                        var tex = new D3D11Texture2DT((nint)f->data[0]);
+                        int slice = (int)(nint)f->data[1];
+                        var inDesc = new VideoProcessorInputViewDescription
+                        {
+                            ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+                            Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = (uint)slice },
+                        };
+                        using var inView = _videoDevice.CreateVideoProcessorInputView(tex, _procEnum, inDesc);
+                        if (inView == null) { _log("GPU: InputView 创建失败"); }
+                        else
+                        {
+                            int srcW = f->width, srcH = f->height;
+                            double s = Math.Min((double)_swapW / srcW, (double)_swapH / srcH);
+                            int dw = Math.Max(1, (int)(srcW * s));
+                            int dh = Math.Max(1, (int)(srcH * s));
+                            int dx = (_swapW - dw) / 2;
+                            int dy = (_swapH - dh) / 2;
 
-                    int srcW = f->width, srcH = f->height;
-                    double s = Math.Min((double)_swapW / srcW, (double)_swapH / srcH);
-                    int dw = Math.Max(1, (int)(srcW * s));
-                    int dh = Math.Max(1, (int)(srcH * s));
-                    int dx = (_swapW - dw) / 2;
-                    int dy = (_swapH - dh) / 2;
-
-                    _context.ClearRenderTargetView(_rtvBb, new Color4(0, 0, 0, 1));
-                    _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
-                        new RawRect(0, 0, srcW, srcH));
-                    _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
-                        new RawRect(dx, dy, dx + dw, dy + dh));
-                    _videoContext.VideoProcessorBlt(_processor, _bbOutView, 0u, new[] {
-                        new VideoProcessorStream { Enable = true, InputSurface = inView },
-                    });
+                            _context.ClearRenderTargetView(_rtvBb, new Color4(0, 0, 0, 1));
+                            _videoContext.VideoProcessorSetStreamSourceRect(_processor, 0u, true,
+                                new RawRect(0, 0, srcW, srcH));
+                            _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
+                                new RawRect(dx, dy, dx + dw, dy + dh));
+                            _videoContext.VideoProcessorBlt(_processor, _bbOutView, 0u, new[] {
+                                new VideoProcessorStream { Enable = true, InputSurface = inView },
+                            });
+                            rendered = true;
+                        }
+                    }
                 }
-                _swapChain.Present(1, PresentFlags.None);
-                _presentedOnce = true;
+                if (rendered) _swapChain.Present(1, PresentFlags.None);
             }
             catch (Exception ex)
             {
@@ -250,8 +256,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             }
         }
     }
-
-    private bool _presentedOnce;
 
     private void ApplyPendingResize()
     {
@@ -275,7 +279,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _rtvBb?.Dispose(); _rtvBb = null;
         _bbOutView?.Dispose(); _bbOutView = null;
         _backBuffer?.Dispose(); _backBuffer = null;
-        if (_swapChain == null || _device == null || _videoDevice == null || _procEnum == null) return;
+        if (_swapChain == null || _device == null) return;
 
         using var bb = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
         _backBuffer = new D3D11Texture2DT(bb.NativePointer);
