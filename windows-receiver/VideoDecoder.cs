@@ -64,13 +64,25 @@ public sealed unsafe class VideoDecoder : IDisposable
     {
         get
         {
-            if (_hwDev == default) return IntPtr.Zero;
+            if (_hwDev == default)
+            {
+                if (!_hwDiagLogged) { _hwDiagLogged = true; Log.Write("HwD3DDevice: _hwDev 为空"); }
+                return IntPtr.Zero;
+            }
             var ctx = (AVHWDeviceContext*)_hwDev->data;
-            if (ctx->type != AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA) return IntPtr.Zero;
+            if (ctx->type != AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA)
+            {
+                if (!_hwDiagLogged) { _hwDiagLogged = true; Log.Write($"HwD3DDevice: 类型不匹配 {ctx->type}"); }
+                return IntPtr.Zero;
+            }
             var d3d = (AVD3D11VADeviceContext*)ctx->hwctx;
-            return (IntPtr)d3d->device;
+            var dev = (IntPtr)d3d->device;
+            if (dev == IntPtr.Zero && !_hwDiagLogged)
+            { _hwDiagLogged = true; Log.Write("HwD3DDevice: hwctx->device 为空"); }
+            return dev;
         }
     }
+    private bool _hwDiagLogged;
 
     /// 光标精灵（BGRA 直通 alpha），解码后每帧混入
     public void SetCursorSprite(byte[] bgra, int w, int h)
