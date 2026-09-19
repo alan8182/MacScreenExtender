@@ -20,6 +20,8 @@ public sealed unsafe class VideoDecoder : IDisposable
     SwsContext* _sws;
     AVFrame* _frame;
     AVFrame* _swFrame;                 // 硬解帧 → 内存下载目标
+    AVFrame* _retained;                // GPU 直渲：保留最后一帧的纹理引用（合成线程渲染用）
+    readonly object _hwSync = new();   // 保护 _retained 的换入换出
     AVPacket* _pkt;
     AVBufferRef* _hwDev;               // d3d11va 设备（跨重开复用，Dispose 时释放）
     int _videoIndex = -1;
@@ -58,6 +60,28 @@ public sealed unsafe class VideoDecoder : IDisposable
     public volatile bool GpuFailed;
     public bool IsGpuRendering => Renderer != null && !GpuFailed;
     private int _gpuFailCount;
+
+    /// 供渲染器同步的锁（保护 _retained 的换入换出）
+    public object HwSync => _hwSync;
+
+    /// 取保留帧（不锁；调用方须在 HwSync 锁内使用）
+    internal bool TryGetGpuFrameRaw(out AVFrame* frame)
+    {
+        if (_retained != null && _retained->data[0] != null) { frame = _retained; return true; }
+        frame = null;
+        return false;
+    }
+
+    /// 尝试取最后一帧硬件解码帧（须在 HwSync 锁内使用）
+    public bool TryGetGpuFrame(out AVFrame* frame)
+    {
+        lock (_hwSync)
+        {
+            if (_retained != null && _retained->data[0] != null) { frame = _retained; return true; }
+        }
+        frame = null;
+        return false;
+    }
 
     /// 硬解设备的 ID3D11Device 原生指针（渲染器用它搭建同设备管线）
     public IntPtr HwD3DDevice
@@ -219,6 +243,7 @@ public sealed unsafe class VideoDecoder : IDisposable
 
         _frame = ffmpeg.av_frame_alloc();
         _swFrame = ffmpeg.av_frame_alloc();
+        _retained = ffmpeg.av_frame_alloc();
         _pkt = ffmpeg.av_packet_alloc();
         _log($"解码器: 就绪 {_dec->width}x{_dec->height} 线程={_dec->thread_count}");
         return true;
@@ -246,20 +271,18 @@ public sealed unsafe class VideoDecoder : IDisposable
                             if (Renderer != null && !GpuFailed &&
                                 _frame->format == (int)AVPixelFormat.AV_PIX_FMT_D3D11)
                             {
-                                // GPU 直渲（解码线程执行；CPU 零拷贝）
-                                float cnx, cny; bool cvis;
-                                lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
-                                if (Renderer.UploadFrame(_frame))
+                                // GPU 路径：解码线程只保留帧引用（渲染由合成线程做，
+                                // 避免与 Present 争抢设备上下文导致整体变慢）
+                                lock (_hwSync)
                                 {
-                                    lock (_sync) { _w = _frame->width; _h = _frame->height; }
-                                    _gpuFailCount = 0;
-                                    _frameCount++;
-                                    if (_frameCount == 1) _log($"解码器: GPU 首帧已出 {_w}x{_h}");
-                                    FrameReady?.Invoke();
-                                    continue;
+                                    ffmpeg.av_frame_unref(_retained);
+                                    ffmpeg.av_frame_ref(_retained, _frame);
                                 }
-                                if (++_gpuFailCount > 300) GpuFailed = true;   // 容忍初始探测期的失败，300 帧（约 5-15 秒）仍全败才熔断
-                                ConvertAndStore(_frame);
+                                lock (_sync) { _w = _frame->width; _h = _frame->height; }
+                                _gpuFailCount = 0;
+                                _frameCount++;
+                                if (_frameCount == 1) _log($"解码器: GPU 首帧已出 {_w}x{_h}");
+                                FrameReady?.Invoke();
                             }
                             else
                             {
@@ -365,11 +388,12 @@ public sealed unsafe class VideoDecoder : IDisposable
 
     void CloseLocked()
     {
-        var pkt = _pkt; var frame = _frame; var swFrame = _swFrame; var dec = _dec; var fmt = _fmt; var sws = _sws;
-        _pkt = null; _frame = null; _swFrame = null; _dec = null; _fmt = null; _sws = null;
+        var pkt = _pkt; var frame = _frame; var swFrame = _swFrame; var ret = _retained; var dec = _dec; var fmt = _fmt; var sws = _sws;
+        _pkt = null; _frame = null; _swFrame = null; _retained = null; _dec = null; _fmt = null; _sws = null;
         if (pkt != null) ffmpeg.av_packet_free(&pkt);
         if (frame != null) ffmpeg.av_frame_free(&frame);
         if (swFrame != null) ffmpeg.av_frame_free(&swFrame);
+        if (ret != null) ffmpeg.av_frame_free(&ret);
         if (dec != null) ffmpeg.avcodec_free_context(&dec);
         if (fmt != null) ffmpeg.avformat_close_input(&fmt);
         if (sws != null) ffmpeg.sws_freeContext(sws);
