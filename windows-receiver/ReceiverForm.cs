@@ -323,11 +323,35 @@ public class ReceiverForm : Form
     private volatile bool _paintPending;
     private void OnFrameReady()
     {
-        if (_dec is { IsGpuRendering: true }) return;   // GPU 已在解码线程上屏
+        // GPU 模式：画面由渲染线程直出，但全屏切换等 UI 事务仍需走 UI 线程
+        if (_dec is { IsGpuRendering: true })
+        {
+            if (!_autoFullscreenDone && !_paintPending && IsHandleCreated)
+            {
+                _paintPending = true;
+                try { BeginInvoke(new Action(() => { _paintPending = false; EnsureFullscreen(); })); }
+                catch { _paintPending = false; }
+            }
+            return;
+        }
         if (_paintPending || !IsHandleCreated) return;
         _paintPending = true;
         try { BeginInvoke(new Action(() => { _paintPending = false; PaintTick(); })); }
         catch { _paintPending = false; }
+    }
+
+    /// 首帧到达即进全屏（一次）；跟随窗口当前所在的那块屏
+    void EnsureFullscreen()
+    {
+        if (_autoFullscreenDone) return;
+        _autoFullscreenDone = true;
+        _status.Text = "已连接";
+        FormBorderStyle = FormBorderStyle.None;
+        Bounds = Screen.FromControl(this).Bounds;
+        _oldImc = ImmAssociateContext(Handle, IntPtr.Zero);   // 禁本机 IME，输入全交 Mac
+        _forwarder?.Dispose();
+        _forwarder = new InputForwarder(ControlActive, SendPacket, _screenW, _screenH);
+        Cursor.Show();   // 保证系统光标可见（它就是零延迟光标层）
     }
 
     void PaintTick()
