@@ -64,7 +64,8 @@ public sealed class InputForwarder : IDisposable
                     Interlocked.Exchange(ref _lastMoveSentTicks, DateTime.UtcNow.Ticks);
                     lock (_localLock) { _localNx = nx; _localNy = ny; _localValid = true; }
                     Enqueue(Move(nx, ny));
-                    return (IntPtr)1;
+                    // 移动放行：让系统光标自然移动（它就是光标层）；点击/滚轮仍被吞掉
+                    return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
                 case WM_LBUTTONDOWN: Enqueue(Button(0, true, nx, ny)); return (IntPtr)1;
                 case WM_LBUTTONUP: Enqueue(Button(0, false, nx, ny)); return (IntPtr)1;
                 case WM_RBUTTONDOWN: Enqueue(Button(1, true, nx, ny)); return (IntPtr)1;

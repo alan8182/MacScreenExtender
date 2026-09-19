@@ -231,13 +231,15 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
             if (_resizePending)
             {
-                _resizePending = false;
+                // 两步走：本帧释放全部后备缓冲引用且不 Present（让交换链翻转完成），
+                // 下一帧再 ResizeBuffers —— 紧贴 Present 调用会得到 DXGI_ERROR_INVALID_CALL
                 _rtv?.Dispose(); _rtv = null;
                 _bbOutView?.Dispose(); _bbOutView = null;
                 _backBuffer?.Dispose(); _backBuffer = null;
                 var rr = _swapChain.ResizeBuffers(0, (uint)_pendW, (uint)_pendH, Format.Unknown, SwapChainFlags.None);
                 if (rr.Success)
                 {
+                    _resizePending = false;
                     _swapW = _pendW; _swapH = _pendH;
                     using var bb = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
                     _backBuffer = new D3D11Texture2DT(bb.NativePointer);
@@ -251,7 +253,8 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 }
                 else
                 {
-                    _log($"GPU: ResizeBuffers 失败 {rr}");
+                    Thread.Sleep(30);   // 让在途 Present 完成，下轮重试
+                    return;
                 }
             }
 
