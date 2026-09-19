@@ -17,6 +17,8 @@ final class ControlServer: @unchecked Sendable {
     var cursorProvider: (() -> (nx: Float, ny: Float, inside: Bool))?
     /// 控制通道鉴权（按 IP），App 注入
     var isAuthorized: ((String) -> Bool)?
+    /// 客户端请求立即发送 IDR 关键帧（type 9）
+    var onRequestKeyframe: (() -> Void)?
     /// 是否有控制客户端在线（在线时视频里不再叠光标，由客户端本地画）
     var hasClients: Bool { queue.sync { !conns.isEmpty } }
 
@@ -213,6 +215,9 @@ final class ControlServer: @unchecked Sendable {
             if first, rttEwmaMs > 0 {
                 print(String(format: "🔁 控制通道 RTT %.0fms", rttEwmaMs))
             }
+        case 9:   // 客户端请求立即发送 IDR 关键帧
+            Log.write("🔑 控制通道: 收到客户端 IDR 关键帧请求")
+            onRequestKeyframe?()
         default:
             break
         }

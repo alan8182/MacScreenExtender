@@ -1,15 +1,27 @@
 # SwiftPM 构建产物
 .build/
 build/
+.swiftpm/
 
-# Windows 构建产物
+# Windows / .NET 构建产物
 windows-receiver/bin/
 windows-receiver/obj/
 windows-receiver/publish/
+windows-receiver/.local/
+windows-receiver/Library/
+*.user
+*.suo
+
+# 发布包与临时文件
 *.zip
+*.dmg
+test.bmp
 
-# macOS
+# 系统与 IDE 缓存
 .DS_Store
-
-# 本地助手配置
+*.swp
+*.swo
 .claude/
+.zcode/
+.idea/
+.vscode/

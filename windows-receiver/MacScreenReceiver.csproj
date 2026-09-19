@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>MacScreenReceiver</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>

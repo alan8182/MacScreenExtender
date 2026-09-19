@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 清新蔚蓝到海泉绿的渐变底板 -->
+    <linearGradient id="bgGrad" x1="0.15" y1="0.0" x2="0.85" y2="1.0">
+      <stop offset="0%" stop-color="#0084FF" />
+      <stop offset="50%" stop-color="#00B4D8" />
+      <stop offset="100%" stop-color="#06D6A0" />
+    </linearGradient>
+
+    <linearGradient id="rimBevel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.75" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- 顶部微光罩 -->
+    <linearGradient id="topLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.3" />
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 主屏纯净深海渐变 -->
+    <linearGradient id="macGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+
+    <!-- 副屏纯净薄荷青渐变 -->
+    <linearGradient id="extGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#065F46" />
+    </linearGradient>
+
+    <!-- 屏幕纯净极光光带 -->
+    <linearGradient id="auroraMac" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0077B6" />
+      <stop offset="100%" stop-color="#48CAE4" />
+    </linearGradient>
+
+    <linearGradient id="auroraExt" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <!-- 玻璃斜切反光 -->
+    <linearGradient id="glassSheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 整体大投影 -->
+    <filter id="appShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="32" stdDeviation="36" flood-color="#012a4a" flood-opacity="0.28" />
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#012a4a" flood-opacity="0.15" />
+    </filter>
+
+    <!-- 浮空卡片投影 -->
+    <filter id="cardShadowMac" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#022338" flood-opacity="0.32" />
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#022338" flood-opacity="0.16" />
+    </filter>
+
+    <filter id="cardShadowExt" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#022338" flood-opacity="0.36" />
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#022338" flood-opacity="0.20" />
+    </filter>
+
+    <filter id="glowPulse" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle 底板 -->
+  <g filter="url(#appShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bgGrad)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#rimBevel)" stroke-width="2.5" />
+    <path d="M 285,101 L 739,101 C 820,101 880,140 900,220 C 700,260 324,260 124,220 C 144,140 204,101 285,101 Z" fill="url(#topLight)" />
+  </g>
+
+  <!-- 2. 后层主屏幕（Mac 电脑）：极简白框 + 极简纯净纯色桌面 -->
+  <g filter="url(#cardShadowMac)">
+    <!-- 极简底座 -->
+    <path d="M 408,580 L 452,580 L 444,650 L 416,650 Z" fill="#E2E8F0" />
+    <rect x="365" y="646" width="130" height="10" rx="5" fill="#FFFFFF" />
+
+    <!-- 纯白外框 -->
+    <rect x="215" y="300" width="430" height="285" rx="24" fill="#FFFFFF" />
+    <!-- 屏幕黑内胆 -->
+    <rect x="227" y="312" width="406" height="261" rx="15" fill="url(#macGrad)" />
+    <!-- 屏幕中纯粹的极光波浪 -->
+    <path d="M227,470 C310,400 450,530 633,410 L633,573 L227,573 Z" fill="url(#auroraMac)" opacity="0.9" />
+    <!-- 玻璃斜切光泽 -->
+    <path d="M227,312 L430,312 L227,515 Z" fill="url(#glassSheen)" />
+  </g>
+
+  <!-- 3. 前层拓展屏幕（伴随拓展屏）：纯白边框 + 薄荷极光 -->
+  <g filter="url(#cardShadowExt)">
+    <!-- 纯白外框 -->
+    <rect x="435" y="395" width="385" height="265" rx="22" fill="#FFFFFF" />
+    <!-- 屏幕黑内胆 -->
+    <rect x="447" y="407" width="361" height="241" rx="14" fill="url(#extGrad)" />
+    <!-- 屏幕中纯粹的翠绿极光波浪 -->
+    <path d="M447,545 C530,485 645,595 808,505 L808,648 L447,648 Z" fill="url(#auroraExt)" opacity="0.9" />
+    <!-- 玻璃斜切光泽 -->
+    <path d="M447,407 L625,407 L447,585 Z" fill="url(#glassSheen)" />
+
+    <!-- 极简超清指示绿钻 -->
+    <circle cx="778" cy="432" r="5" fill="#34D399" filter="url(#glowPulse)" />
+    <circle cx="778" cy="432" r="4" fill="#FFFFFF" />
+  </g>
+
+  <!-- 4. 极简随航连接纽带（纯净白光弧） -->
+  <g>
+    <path d="M 428,475 A 32,32 0 0,1 428,535" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" />
+    <path d="M 410,460 A 52,52 0 0,1 410,550" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity="0.8" />
+    <path d="M 392,445 A 72,72 0 0,1 392,565" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" opacity="0.55" />
+    <circle cx="442" cy="505" r="6" fill="#FFFFFF" />
+  </g>
+</svg>

@@ -24,11 +24,15 @@ public sealed unsafe class VideoDecoder : IDisposable
     readonly object _hwSync = new();   // 保护 _retained 的换入换出
     AVPacket* _pkt;
     AVBufferRef* _hwDev;               // d3d11va 设备（跨重开复用，Dispose 时释放）
+    AVCodecParserContext* _parser;     // NALU 解析器（TCP 裸流直通）
+    System.Net.Sockets.TcpClient? _tcpClient;
     int _videoIndex = -1;
     int _srcFormat = -1;
     int _consecSendErr;
     // 硬解熔断（实例级）：驱动不配合时本次解码器退回软解；新连接重新尝试
     private bool _hwDisabled;
+    // 硬解格式协商回调（保持引用防 GC 回收）：指定选择 AV_PIX_FMT_D3D11
+    private readonly AVCodecContext_get_format _getFormatFunc;
 
     IntPtr _bgra = IntPtr.Zero;
     int _w, _h;
@@ -51,6 +55,9 @@ public sealed unsafe class VideoDecoder : IDisposable
     /// 每解出一帧回调（Form 端用于"帧到即画"，消除轮询抖动；Form 侧负责合并防洪水）
     public Action? FrameReady;
 
+    /// 立即向 Mac 端发送 IDR 关键帧请求回调
+    public Action? KeyframeRequester;
+
     /// GPU 渲染器（非空且硬解帧时：解码线程直接 GPU 上屏，零内存拷贝）
     public GpuVideoRenderer? Renderer;
     /// 渲染器提供的 D3D11VA 设备引用工厂（解码纹理与渲染同设备的关键）
@@ -63,6 +70,16 @@ public sealed unsafe class VideoDecoder : IDisposable
 
     /// 供渲染器同步的锁（保护 _retained 的换入换出）
     public object HwSync => _hwSync;
+
+    private static AVPixelFormat GetFormat(AVCodecContext* s, AVPixelFormat* fmt)
+    {
+        for (var p = fmt; *p != AVPixelFormat.AV_PIX_FMT_NONE; p++)
+        {
+            if (*p == AVPixelFormat.AV_PIX_FMT_D3D11)
+                return *p;
+        }
+        return ffmpeg.avcodec_default_get_format(s, fmt);
+    }
 
     /// 取保留帧（不锁；调用方须在 HwSync 锁内使用）
     internal bool TryGetGpuFrameRaw(out AVFrame* frame)
@@ -126,7 +143,12 @@ public sealed unsafe class VideoDecoder : IDisposable
         ffmpeg.avformat_network_init();
     }
 
-    public VideoDecoder(string url) { _url = url; _log = m => Log.Write(m); }
+    public VideoDecoder(string url)
+    {
+        _url = url;
+        _log = m => Log.Write(m);
+        _getFormatFunc = GetFormat;
+    }
 
     public void Start()
     {
@@ -138,6 +160,7 @@ public sealed unsafe class VideoDecoder : IDisposable
     public void Dispose()
     {
         _running = false;
+        try { _tcpClient?.Close(); } catch { }
         try { _thread?.Join(6000); } catch { }   // rw_timeout 5s 内必然退出读循环
         CloseLocked();
         lock (_sync)
@@ -157,13 +180,264 @@ public sealed unsafe class VideoDecoder : IDisposable
         {
             try
             {
-                if (!Open()) { Thread.Sleep(3000); continue; }
-                ReadLoop();
+                bool isRaw = _url.Contains("/raw", StringComparison.OrdinalIgnoreCase);
+                if (isRaw)
+                {
+                    if (!OpenRawTcp()) { Thread.Sleep(3000); continue; }
+                    ReadLoopRawTcp();
+                }
+                else
+                {
+                    if (!Open()) { Thread.Sleep(3000); continue; }
+                    ReadLoop();
+                }
             }
             catch { }
             CloseLocked();
             if (_running) Thread.Sleep(2000);   // 断流后稍等重连
         }
+    }
+
+    bool OpenRawTcp()
+    {
+        try
+        {
+            var uri = new Uri(_url);
+            var client = new System.Net.Sockets.TcpClient();
+            client.NoDelay = true;
+            client.ReceiveTimeout = 6000;
+            client.SendTimeout = 6000;
+            client.Connect(uri.Host, uri.Port);
+            _tcpClient = client;
+
+            var stream = client.GetStream();
+            string req = $"GET {uri.PathAndQuery} HTTP/1.1\r\nHost: {uri.Host}:{uri.Port}\r\nConnection: keep-alive\r\n\r\n";
+            byte[] reqBytes = System.Text.Encoding.ASCII.GetBytes(req);
+            stream.Write(reqBytes, 0, reqBytes.Length);
+
+            // 连上瞬间主动请求 IDR 关键帧，起流 0 等待
+            KeyframeRequester?.Invoke();
+
+            // 读 HTTP 响应头
+            var headerBuf = new byte[4096];
+            int totalRead = 0;
+            int bodyOffset = -1;
+            while (totalRead < headerBuf.Length)
+            {
+                int r = stream.Read(headerBuf, totalRead, 1);
+                if (r <= 0) break;
+                totalRead++;
+                if (totalRead >= 4 &&
+                    headerBuf[totalRead - 4] == (byte)'\r' && headerBuf[totalRead - 3] == (byte)'\n' &&
+                    headerBuf[totalRead - 2] == (byte)'\r' && headerBuf[totalRead - 1] == (byte)'\n')
+                {
+                    bodyOffset = totalRead;
+                    break;
+                }
+            }
+            if (bodyOffset < 0)
+            {
+                _log("解码器: 读取 HTTP 响应头失败");
+                return false;
+            }
+
+            string headers = System.Text.Encoding.ASCII.GetString(headerBuf, 0, bodyOffset);
+            bool isHevc = headers.Contains("video/hevc", StringComparison.OrdinalIgnoreCase) ||
+                          _url.Contains("codec=hevc", StringComparison.OrdinalIgnoreCase);
+            var codecId = isHevc ? AVCodecID.AV_CODEC_ID_HEVC : AVCodecID.AV_CODEC_ID_H264;
+
+            var codec = ffmpeg.avcodec_find_decoder(codecId);
+            if (codec == null)
+            {
+                _log($"解码器: 找不到解码器 {codecId}");
+                return false;
+            }
+            _dec = ffmpeg.avcodec_alloc_context3(codec);
+
+            bool hwAttached = false;
+            if (Renderer != null && !_hwDisabled && _hwDev == null)
+            {
+                AVBufferRef* dev = null;
+                if (ffmpeg.av_hwdevice_ctx_create(&dev, AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA, null, null, 0) == 0)
+                {
+                    _hwDev = dev;
+                }
+                else
+                {
+                    _hwDisabled = true;
+                }
+            }
+            if (Renderer != null && _hwDev != null && !_hwDisabled)
+            {
+                _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
+                _dec->get_format = _getFormatFunc;
+                hwAttached = true;
+            }
+            _srcFormat = -1;
+            _consecSendErr = 0;
+
+            AVDictionary* dopts = null;
+            ffmpeg.av_dict_set(&dopts, "flags", "low_delay", 0);
+            _log($"解码器 (TCP+Parser): 打开 ({(hwAttached ? "硬件" : "软解")}, {codecId})");
+            int openRet = ffmpeg.avcodec_open2(_dec, codec, &dopts);
+            if (openRet < 0 && hwAttached)
+            {
+                ffmpeg.av_buffer_unref(&_dec->hw_device_ctx);
+                _dec->get_format = default;
+                _hwDisabled = true;
+                hwAttached = false;
+                if (ffmpeg.avcodec_open2(_dec, codec, &dopts) < 0) return false;
+            }
+            else if (openRet < 0) return false;
+            if (hwAttached) _dec->thread_count = 1;
+
+            _parser = ffmpeg.av_parser_init((int)codecId);
+            if (_parser == null)
+            {
+                _log("解码器: av_parser_init 失败");
+                return false;
+            }
+
+            _frame = ffmpeg.av_frame_alloc();
+            _swFrame = ffmpeg.av_frame_alloc();
+            lock (_hwSync)
+            {
+                _retained = ffmpeg.av_frame_alloc();
+            }
+            _pkt = ffmpeg.av_packet_alloc();
+            _log($"解码器 (TCP+Parser): 就绪 线程={_dec->thread_count}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"解码器 (TCP+Parser): 打开异常 {ex.Message}");
+            return false;
+        }
+    }
+
+    void ReadLoopRawTcp()
+    {
+        var client = _tcpClient;
+        if (client == null) return;
+        var stream = client.GetStream();
+        var parser = _parser;
+        var dec = _dec;
+        var pkt = _pkt;
+        if (parser == null || dec == null || pkt == null) return;
+
+        var buf = new byte[64 * 1024];
+        long lastSeen = _frameCount;
+        var stallStart = DateTime.UtcNow;
+        bool firstPacketLogged = false;
+
+        fixed (byte* pBuf = buf)
+        {
+            while (_running && client.Connected)
+            {
+                int bytesRead = 0;
+                try
+                {
+                    bytesRead = stream.Read(buf, 0, buf.Length);
+                }
+                catch
+                {
+                    break;
+                }
+                if (bytesRead <= 0) break;
+
+                if (!firstPacketLogged)
+                {
+                    firstPacketLogged = true;
+                    _log("解码器: 收到首批流字节");
+                }
+
+                byte* inPtr = pBuf;
+                int inLen = bytesRead;
+                while (inLen > 0)
+                {
+                    byte* outData = null;
+                    int outSize = 0;
+                    int consumed = ffmpeg.av_parser_parse2(parser, dec, &outData, &outSize,
+                                                           inPtr, inLen,
+                                                           ffmpeg.AV_NOPTS_VALUE, ffmpeg.AV_NOPTS_VALUE, 0);
+                    if (consumed < 0) break;
+                    inPtr += consumed;
+                    inLen -= consumed;
+
+                    if (outSize > 0 && outData != null)
+                    {
+                        pkt->data = outData;
+                        pkt->size = outSize;
+                        pkt->pts = ffmpeg.AV_NOPTS_VALUE;
+                        pkt->dts = ffmpeg.AV_NOPTS_VALUE;
+
+                        try
+                        {
+                            int sendRet = ffmpeg.avcodec_send_packet(dec, pkt);
+                            if (sendRet == 0 || sendRet == unchecked((int)ffmpeg.EAGAIN))
+                            {
+                                if (sendRet == 0) _consecSendErr = 0;
+                                while (ffmpeg.avcodec_receive_frame(dec, _frame) >= 0)
+                                {
+                                    if (Renderer != null && !GpuFailed &&
+                                        _frame->format == (int)AVPixelFormat.AV_PIX_FMT_D3D11)
+                                    {
+                                        lock (_hwSync)
+                                        {
+                                            ffmpeg.av_frame_unref(_retained);
+                                            ffmpeg.av_frame_ref(_retained, _frame);
+                                        }
+                                        lock (_sync) { _w = _frame->width; _h = _frame->height; }
+                                        _gpuFailCount = 0;
+                                        _frameCount++;
+                                        if (_frameCount == 1) _log($"解码器: GPU 首帧已出 {_w}x{_h}");
+                                        Renderer?.SignalFrame();
+                                        FrameReady?.Invoke();
+                                    }
+                                    else
+                                    {
+                                        ConvertAndStore(_frame);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                if (++_consecSendErr > 50 && _hwDev != null && !_hwDisabled)
+                                {
+                                    _hwDisabled = true;
+                                    break;
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            pkt->data = null;
+                            pkt->size = 0;
+                        }
+                    }
+                }
+
+                if (_frameCount != lastSeen)
+                {
+                    lastSeen = _frameCount;
+                    stallStart = DateTime.UtcNow;
+                }
+                else
+                {
+                    var elapsed = (DateTime.UtcNow - stallStart).TotalSeconds;
+                    if (elapsed > 2.0 && elapsed < 2.5)
+                    {
+                        KeyframeRequester?.Invoke();
+                    }
+                    else if (elapsed > 6.0)
+                    {
+                        _log("解码器: 6 秒无新帧，重建连接");
+                        break;
+                    }
+                }
+            }
+        }
+        _log($"解码器: TCP 读循环退出 (running={_running})");
     }
 
     bool Open()
@@ -221,6 +495,7 @@ public sealed unsafe class VideoDecoder : IDisposable
         if (_hwDev != null && !_hwDisabled)
         {
             _dec->hw_device_ctx = ffmpeg.av_buffer_ref(_hwDev);
+            _dec->get_format = _getFormatFunc;
             hwAttached = true;
         }
         _srcFormat = -1;
@@ -232,8 +507,9 @@ public sealed unsafe class VideoDecoder : IDisposable
         int openRet = ffmpeg.avcodec_open2(_dec, codec, &dopts);
         if (openRet < 0 && hwAttached)
         {
-            // 硬解初始化失败：摘掉 hw_device_ctx 用软解重开一次
+            // 硬解初始化失败：摘掉 hw_device_ctx 与 get_format 用软解重开一次
             ffmpeg.av_buffer_unref(&_dec->hw_device_ctx);
+            _dec->get_format = default;
             _hwDisabled = true;
             hwAttached = false;
             if (ffmpeg.avcodec_open2(_dec, codec, &dopts) < 0) return false;
@@ -243,7 +519,10 @@ public sealed unsafe class VideoDecoder : IDisposable
 
         _frame = ffmpeg.av_frame_alloc();
         _swFrame = ffmpeg.av_frame_alloc();
-        _retained = ffmpeg.av_frame_alloc();
+        lock (_hwSync)
+        {
+            _retained = ffmpeg.av_frame_alloc();
+        }
         _pkt = ffmpeg.av_packet_alloc();
         _log($"解码器: 就绪 {_dec->width}x{_dec->height} 线程={_dec->thread_count}");
         return true;
@@ -282,6 +561,7 @@ public sealed unsafe class VideoDecoder : IDisposable
                                 _gpuFailCount = 0;
                                 _frameCount++;
                                 if (_frameCount == 1) _log($"解码器: GPU 首帧已出 {_w}x{_h}");
+                                Renderer?.SignalFrame();
                                 FrameReady?.Invoke();
                             }
                             else
@@ -388,8 +668,22 @@ public sealed unsafe class VideoDecoder : IDisposable
 
     void CloseLocked()
     {
-        var pkt = _pkt; var frame = _frame; var swFrame = _swFrame; var ret = _retained; var dec = _dec; var fmt = _fmt; var sws = _sws;
-        _pkt = null; _frame = null; _swFrame = null; _retained = null; _dec = null; _fmt = null; _sws = null;
+        if (_parser != null)
+        {
+            var p = _parser; _parser = null;
+            ffmpeg.av_parser_close(p);
+        }
+        try { _tcpClient?.Close(); } catch { }
+        _tcpClient = null;
+
+        var pkt = _pkt; var frame = _frame; var swFrame = _swFrame; var dec = _dec; var fmt = _fmt; var sws = _sws;
+        AVFrame* ret = null;
+        lock (_hwSync)
+        {
+            ret = _retained;
+            _retained = null;
+        }
+        _pkt = null; _frame = null; _swFrame = null; _dec = null; _fmt = null; _sws = null;
         if (pkt != null) ffmpeg.av_packet_free(&pkt);
         if (frame != null) ffmpeg.av_frame_free(&frame);
         if (swFrame != null) ffmpeg.av_frame_free(&swFrame);

@@ -41,7 +41,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private DxgiSwapChainT? _swapChain;
     private D3D11RtvT? _rtvBb;               // 后备缓冲清屏用
     private D3D11OutputViewT? _bbOutView;    // 后备缓冲输出视图（合成 Blt 目标）
-    private D3D11Texture2DT? _backBuffer;
     private D3D11VideoDeviceT? _videoDevice;
     private D3D11VideoContextT? _videoContext;
     private D3D11ProcEnumT? _procEnum;
@@ -58,6 +57,14 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private Thread? _composeThread;
     private volatile bool _composeRunning;
     private long _lastFc = -1;
+    private IntPtr _waitableObject = IntPtr.Zero;
+    private readonly AutoResetEvent _frameSignal = new(false);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    /// 由解码器通知新帧到达，0ms 唤醒合成线程
+    public void SignalFrame() => _frameSignal.Set();
 
     /// 设备提供者：返回解码器硬解设备的 ID3D11Device 原生指针
     public Func<IntPtr>? DeviceProvider;
@@ -112,25 +119,25 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 SampleDescription = new SampleDescription(1, 0),
                 BufferUsage = Usage.RenderTargetOutput,
                 BufferCount = 2,
-                Scaling = Scaling.None,
+                Scaling = Scaling.Stretch,
                 SwapEffect = SwapEffect.FlipSequential,
                 AlphaMode = AlphaMode.Ignore,
-                Flags = SwapChainFlags.None,
+                Flags = SwapChainFlags.FrameLatencyWaitableObject,
             };
             _swapChain = factory.CreateSwapChainForHwnd(_device, _hwnd, scDesc);
             if (_swapChain == null) { _log("GPU: 交换链创建失败"); return false; }
-            _log("GPU: 交换链就绪 (FLIP_SEQUENTIAL)");
+            _log("GPU: 交换链就绪 (FLIP_SEQUENTIAL + WAITABLE)");
+
+            using var sc2 = _swapChain.QueryInterface<IDXGISwapChain2>();
+            if (sc2 != null)
+            {
+                sc2.MaximumFrameLatency = 1;
+                _waitableObject = sc2.FrameLatencyWaitableObject;
+            }
 
             _videoDevice = _device.QueryInterface<D3D11VideoDeviceT>();
             _videoContext = _context.QueryInterface<D3D11VideoContextT>();
-            _procEnum = CreateProcEnum(_srcW > 0 ? _srcW : _swapW, _srcH > 0 ? _srcH : _swapH);
-            if (_procEnum == null) return false;
-            _processor = _videoDevice.CreateVideoProcessor(_procEnum, 0u);
-            if (_processor == null) { _log("GPU: VideoProcessor 创建失败"); return false; }
-            _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0u, VideoFrameFormat.Progressive);
-            SetColorSpace();
-            RecreateBackbufferTargets();
-            if (_bbOutView == null || _rtvBb == null) return false;
+            if (!RecreateVideoProcessor()) return false;
 
             _log("GPU: 渲染管线全就绪");
             return true;
@@ -149,21 +156,40 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         return adapter.GetParent<IDXGIFactory2>();
     }
 
-    private D3D11ProcEnumT? CreateProcEnum(int w, int h)
+    private D3D11ProcEnumT? CreateProcEnum(int inW, int inH, int outW, int outH)
     {
         if (_videoDevice == null) return null;
         var desc = new VideoProcessorContentDescription
         {
             InputFrameFormat = VideoFrameFormat.Progressive,
             InputFrameRate = new Rational(60, 1),
-            InputWidth = (uint)w,
-            InputHeight = (uint)h,
+            InputWidth = (uint)Math.Max(1, inW),
+            InputHeight = (uint)Math.Max(1, inH),
             OutputFrameRate = new Rational(120, 1),
-            OutputWidth = (uint)w,
-            OutputHeight = (uint)h,
+            OutputWidth = (uint)Math.Max(1, outW),
+            OutputHeight = (uint)Math.Max(1, outH),
             Usage = VideoUsage.PlaybackNormal,
         };
         return _videoDevice.CreateVideoProcessorEnumerator(desc);
+    }
+
+    private bool RecreateVideoProcessor()
+    {
+        _bbOutView?.Dispose(); _bbOutView = null;
+        _processor?.Dispose(); _processor = null;
+        _procEnum?.Dispose(); _procEnum = null;
+
+        if (_videoDevice == null || _videoContext == null) return false;
+        int inW = _srcW > 0 ? _srcW : _swapW;
+        int inH = _srcH > 0 ? _srcH : _swapH;
+        _procEnum = CreateProcEnum(inW, inH, _swapW, _swapH);
+        if (_procEnum == null) { _log("GPU: VideoProcessorEnumerator 创建失败"); return false; }
+        _processor = _videoDevice.CreateVideoProcessor(_procEnum, 0u);
+        if (_processor == null) { _log("GPU: VideoProcessor 创建失败"); return false; }
+        _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0u, VideoFrameFormat.Progressive);
+        SetColorSpace();
+        RecreateBackbufferTargets();
+        return _bbOutView != null && _rtvBb != null;
     }
 
     private void SetColorSpace()
@@ -191,24 +217,31 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _resizePending = true;
     }
 
-    /// 合成线程主循环：有新帧→缩放合成→垂直同步上屏；无新帧→休眠（GPU 零负载）
+    /// 合成线程主循环：新帧唤醒→等待交换链就绪→缩放合成→Present；无新帧WaitOne等待（GPU 零负载）
     private void ComposeLoop()
     {
         while (_composeRunning)
         {
-            var src = _src;
-            long fc = src?.FrameCount ?? 0;
-            if (fc == _lastFc)
+            // 0ms 信号唤醒：有新帧立即合成，超时 100ms 检查退出与自愈
+            if (!_frameSignal.WaitOne(100))
             {
-                Thread.Sleep(5);   // 无新帧：DWM 保持上一画面，零 GPU 开销
                 continue;
             }
+            var src = _src;
+            long fc = src?.FrameCount ?? 0;
+            if (fc == _lastFc) continue;
             _lastFc = fc;
 
             try
             {
                 if (!EnsureDevice()) { Thread.Sleep(100); continue; }
                 if (_resizePending) ApplyPendingResize();
+
+                // 等待交换链管线就绪（严格锁定最大帧延迟为 1，消除队列积压）
+                if (_waitableObject != IntPtr.Zero)
+                {
+                    WaitForSingleObject(_waitableObject, 100);
+                }
 
                 bool rendered = false;
                 // 取帧 + 建视图 + Blt 同锁原子完成：保留帧的纹理归解码器池所有，
@@ -217,7 +250,16 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 {
                     if (src.TryGetGpuFrameRaw(out var f))
                     {
+                        int srcW = f->width, srcH = f->height;
+                        if (_processor == null || _procEnum == null || _srcW != srcW || _srcH != srcH)
+                        {
+                            _srcW = srcW;
+                            _srcH = srcH;
+                            if (!RecreateVideoProcessor()) continue;
+                        }
+
                         var tex = new D3D11Texture2DT((nint)f->data[0]);
+                        GC.SuppressFinalize(tex); // ponytail: 阻止托管终结器释放 FFmpeg 内部持有的原生纹理
                         int slice = (int)(nint)f->data[1];
                         var inDesc = new VideoProcessorInputViewDescription
                         {
@@ -228,7 +270,6 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                         if (inView == null) { _log("GPU: InputView 创建失败"); }
                         else
                         {
-                            int srcW = f->width, srcH = f->height;
                             double s = Math.Min((double)_swapW / srcW, (double)_swapH / srcH);
                             int dw = Math.Max(1, (int)(srcW * s));
                             int dh = Math.Max(1, (int)(srcH * s));
@@ -262,15 +303,19 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         _resizePending = false;
         _rtvBb?.Dispose(); _rtvBb = null;
         _bbOutView?.Dispose(); _bbOutView = null;
-        _backBuffer?.Dispose(); _backBuffer = null;
-        var rr = _swapChain.ResizeBuffers(0, (uint)_pendW, (uint)_pendH, Format.Unknown, SwapChainFlags.None);
+        var rr = _swapChain.ResizeBuffers(0, (uint)_pendW, (uint)_pendH, Format.Unknown, SwapChainFlags.FrameLatencyWaitableObject);
         if (rr.Failure)
         {
             _log($"GPU: ResizeBuffers 失败 {rr}");
             return;
         }
         _swapW = _pendW; _swapH = _pendH;
-        RecreateBackbufferTargets();
+        using var sc2 = _swapChain.QueryInterface<IDXGISwapChain2>();
+        if (sc2 != null)
+        {
+            _waitableObject = sc2.FrameLatencyWaitableObject;
+        }
+        RecreateVideoProcessor();
         _log($"GPU: 交换链调整 {_swapW}x{_swapH}");
     }
 
@@ -278,11 +323,9 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     {
         _rtvBb?.Dispose(); _rtvBb = null;
         _bbOutView?.Dispose(); _bbOutView = null;
-        _backBuffer?.Dispose(); _backBuffer = null;
-        if (_swapChain == null || _device == null) return;
+        if (_swapChain == null || _device == null || _videoDevice == null || _procEnum == null) return;
 
         using var bb = _swapChain.GetBuffer<D3D11Texture2DT>(0u);
-        _backBuffer = new D3D11Texture2DT(bb.NativePointer);
         _rtvBb = _device.CreateRenderTargetView(bb, null);
         var obDesc = new VideoProcessorOutputViewDescription
         {
@@ -293,9 +336,9 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
     private void TeardownDevice()
     {
+        _waitableObject = IntPtr.Zero;
         _bbOutView?.Dispose(); _bbOutView = null;
         _rtvBb?.Dispose(); _rtvBb = null;
-        _backBuffer?.Dispose(); _backBuffer = null;
         _processor?.Dispose(); _processor = null;
         _procEnum?.Dispose(); _procEnum = null;
         _videoDevice?.Dispose(); _videoDevice = null;

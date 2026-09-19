@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 清新蔚蓝到薄荷绿的自然渐变底板 -->
+    <linearGradient id="skyMintBg" x1="0.1" y1="0.0" x2="0.9" y2="1.0">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="45%" stop-color="#0EA5E9" />
+      <stop offset="80%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+
+    <!-- 顶部透光玻璃罩微米渐变 -->
+    <linearGradient id="topGloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 外框高光描边 -->
+    <linearGradient id="rimBevel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.15" />
+    </linearGradient>
+
+    <!-- 主屏白瓷材质渐变 -->
+    <linearGradient id="whiteCeramic" x1="0.2" y1="0.0" x2="0.8" y2="1.0">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#F1F5F9" />
+    </linearGradient>
+
+    <!-- 副屏磨砂玻璃渐变 -->
+    <linearGradient id="frostedGlass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#E0F2FE" stop-opacity="0.65" />
+    </linearGradient>
+
+    <!-- 副屏内部屏幕浅透渐变 -->
+    <linearGradient id="extDisplayInner" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0284C7" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0.85" />
+    </linearGradient>
+
+    <!-- 柔和立体阴影 -->
+    <filter id="baseShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="32" stdDeviation="36" flood-color="#032b43" flood-opacity="0.28" />
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#032b43" flood-opacity="0.15" />
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#032b43" flood-opacity="0.10" />
+    </filter>
+
+    <filter id="screenShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#012a4a" flood-opacity="0.32" />
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#012a4a" flood-opacity="0.18" />
+    </filter>
+
+    <filter id="frontShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#022338" flood-opacity="0.35" />
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#022338" flood-opacity="0.20" />
+    </filter>
+
+    <filter id="glowLight" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle 底板（清新蓝绿渐变） -->
+  <g filter="url(#baseShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#skyMintBg)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#rimBevel)" stroke-width="2.5" />
+    <!-- 顶部高光弧 -->
+    <path d="M 285,101 L 739,101 C 820,101 880,140 900,220 C 700,260 324,260 124,220 C 144,140 204,101 285,101 Z" fill="url(#topGloss)" />
+  </g>
+
+  <!-- 2. 背景中的微妙环境微光（增加空间通透感） -->
+  <circle cx="620" cy="420" r="160" fill="#67E8F9" opacity="0.25" filter="url(#glowLight)" />
+  <circle cx="420" cy="560" r="140" fill="#34D399" opacity="0.2" filter="url(#glowLight)" />
+
+  <!-- 3. 后层主屏幕（Mac 电脑）：纯白极简框架，微向上悬浮 -->
+  <g filter="url(#screenShadow)">
+    <!-- 主屏外框（纯白陶瓷） -->
+    <rect x="220" y="280" width="420" height="280" rx="24" fill="url(#whiteCeramic)" />
+    <!-- 内屏背景（清澈深蓝） -->
+    <rect x="234" y="294" width="392" height="252" rx="14" fill="#0369A1" />
+    <!-- 内屏桌面壁纸（抽象轻盈水波） -->
+    <path d="M234,440 C310,380 440,510 626,380 L626,546 L234,546 Z" fill="#0284C7" opacity="0.6" />
+    <path d="M234,475 C330,420 460,525 626,425 L626,546 L234,546 Z" fill="#0EA5E9" opacity="0.6" />
+    <path d="M234,505 C350,460 480,535 626,470 L626,546 L234,546 Z" fill="#38BDF8" opacity="0.5" />
+    <!-- 主屏高光 -->
+    <path d="M234,294 L420,294 L234,480 Z" fill="#FFFFFF" opacity="0.22" />
+
+    <!-- 极简立柱支架 -->
+    <path d="M 405,560 L 455,560 L 445,635 L 415,635 Z" fill="#E2E8F0" opacity="0.9" />
+    <rect x="365" y="632" width="130" height="12" rx="6" fill="#FFFFFF" />
+  </g>
+
+  <!-- 4. 前层拓展屏幕（副屏 / 平板 / 拓展显示）：灵动浮现在右前方 -->
+  <g filter="url(#frontShadow)">
+    <!-- 副屏外框（纯白微光带玻璃厚度） -->
+    <rect x="440" y="410" width="380" height="260" rx="22" fill="#FFFFFF" stroke="#BAE6FD" stroke-width="2" />
+    <!-- 副屏内屏 -->
+    <rect x="452" y="422" width="356" height="236" rx="14" fill="#0F766E" />
+    <!-- 副屏内渐变壁纸（与主屏呼应但更青翠、更清新） -->
+    <path d="M452,540 C520,480 640,610 808,490 L808,658 L452,658 Z" fill="#0D9488" opacity="0.6" />
+    <path d="M452,575 C540,520 660,620 808,530 L808,658 L452,658 Z" fill="#14B8A6" opacity="0.6" />
+    <path d="M452,605 C560,560 680,630 808,575 L808,658 L452,658 Z" fill="#2DD4BF" opacity="0.5" />
+    <!-- 副屏高光斜切 -->
+    <path d="M452,422 L620,422 L452,590 Z" fill="#FFFFFF" opacity="0.25" />
+
+    <!-- 顶部点对点 60fps 绿色状态呼吸点 -->
+    <circle cx="778" cy="446" r="5.5" fill="#FFFFFF" />
+    <circle cx="778" cy="446" r="4" fill="#34D399" />
+  </g>
+
+  <!-- 5. 跨屏拓展灵动纽带：两屏之间的纯白光束微波 -->
+  <g>
+    <!-- 无线连接波纹 -->
+    <path d="M 425,480 A 30,30 0 0,1 425,540" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.95" />
+    <path d="M 405,465 A 50,50 0 0,1 405,555" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity="0.8" />
+    <path d="M 385,450 A 70,70 0 0,1 385,570" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.55" />
+    <!-- 中心光核 -->
+    <circle cx="442" cy="510" r="7" fill="#FFFFFF" />
+    <circle cx="442" cy="510" r="4.5" fill="#00E5FF" />
+  </g>
+</svg>

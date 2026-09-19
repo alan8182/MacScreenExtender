@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 背景：纯净清新的深天蓝到薄荷翠绿渐变 (Apple 风格清新调) -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0077F5" />
+      <stop offset="55%" stop-color="#00B0FF" />
+      <stop offset="100%" stop-color="#00D2A0" />
+    </linearGradient>
+
+    <!-- 顶部环境光弧 -->
+    <linearGradient id="topSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.32" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 外边框高光描边 -->
+    <linearGradient id="rimStroke" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.75" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.15" />
+    </linearGradient>
+
+    <!-- 底板微柔阴影 -->
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="36" stdDeviation="34" flood-color="#002b4d" flood-opacity="0.32" />
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#002b4d" flood-opacity="0.16" />
+    </filter>
+
+    <!-- 主体悬浮阴影 (深邃柔和，让双屏如悬浮在玻璃面板上) -->
+    <filter id="floatShadowBack" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#001830" flood-opacity="0.30" />
+    </filter>
+
+    <filter id="floatShadowFront" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="32" stdDeviation="28" flood-color="#001224" flood-opacity="0.38" />
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#001224" flood-opacity="0.15" />
+    </filter>
+
+    <!-- 屏幕纯白质感边框渐变 -->
+    <linearGradient id="screenBezel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E8EEF5" />
+    </linearGradient>
+
+    <!-- 主屏玻璃内屏渐变 (深邃清透海洋蓝) -->
+    <linearGradient id="screenDisplay1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F2440" />
+      <stop offset="100%" stop-color="#1B426E" />
+    </linearGradient>
+
+    <!-- 副屏玻璃内屏渐变 (清亮绿意盎然) -->
+    <linearGradient id="screenDisplay2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0E2F3A" />
+      <stop offset="100%" stop-color="#135952" />
+    </linearGradient>
+
+    <!-- 贯穿两屏的无线极光流彩 (象征屏幕无限延展) -->
+    <linearGradient id="auroraBeam" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#38EF7D" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- 玻璃斜切反光 -->
+    <linearGradient id="glassGloss" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Squircle 外壳 -->
+  <g filter="url(#tileShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bgGrad)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#rimStroke)" stroke-width="2.5" />
+    <!-- 顶部微光 -->
+    <path d="M 285,101 L 739,101 C 820,101 880,140 900,220 C 700,260 324,260 124,220 C 144,140 204,101 285,101 Z" fill="url(#topSheen)" />
+  </g>
+
+  <!-- 2. 后层：主屏幕 (Mac 主显示器) -->
+  <g filter="url(#floatShadowBack)">
+    <!-- 纯净白机身外框 -->
+    <rect x="220" y="260" width="440" height="310" rx="32" fill="url(#screenBezel)" stroke="#FFFFFF" stroke-width="4" />
+    <!-- 屏幕显示区 -->
+    <rect x="238" y="278" width="404" height="274" rx="20" fill="url(#screenDisplay1)" />
+    <!-- 屏内流动的极光壁纸 -->
+    <path d="M 238,440 C 320,380 430,490 642,380 L 642,552 L 238,552 Z" fill="url(#auroraBeam)" opacity="0.4" />
+    <!-- 屏幕玻璃反光 -->
+    <path d="M 238,278 L 470,278 L 238,510 Z" fill="url(#glassGloss)" />
+  </g>
+
+  <!-- 3. 前层：扩展副屏 (Windows / 平板拓展屏) 错落有致微叠放 -->
+  <g filter="url(#floatShadowFront)">
+    <!-- 纯净白外框 -->
+    <rect x="390" y="410" width="430" height="320" rx="34" fill="url(#screenBezel)" stroke="#FFFFFF" stroke-width="4" />
+    <!-- 屏幕显示区 -->
+    <rect x="408" y="428" width="394" height="284" rx="22" fill="url(#screenDisplay2)" />
+    <!-- 屏内极光壁纸 (与后屏呼应延展) -->
+    <path d="M 408,580 C 500,510 610,620 802,510 L 802,712 L 408,712 Z" fill="url(#auroraBeam)" opacity="0.6" />
+    <!-- 屏幕玻璃反光 -->
+    <path d="M 408,428 L 640,428 L 408,660 Z" fill="url(#glassGloss)" />
+  </g>
+
+  <!-- 4. 核心无缝无线流转徽标 (在副屏左上方优雅浮现：双向扩展/流光信号) -->
+  <g>
+    <!-- 发光外圈底盘 -->
+    <circle cx="390" cy="410" r="44" fill="#00D2A0" opacity="0.2" filter="blur(6px)" />
+    <circle cx="390" cy="410" r="38" fill="#FFFFFF" />
+    <!-- 闪亮极速图标：两道互锁的弧形光芒，代表无线屏幕扩展 -->
+    <path d="M 374,402 C 374,394 382,388 391,388 C 401,388 409,396 409,405" fill="none" stroke="#0077F5" stroke-width="5" stroke-linecap="round" />
+    <polygon points="372,398 376,408 382,402" fill="#0077F5" />
+    
+    <path d="M 406,418 C 406,426 398,432 389,432 C 379,432 371,424 371,415" fill="none" stroke="#00D2A0" stroke-width="5" stroke-linecap="round" />
+    <polygon points="408,422 404,412 398,418" fill="#00D2A0" />
+  </g>
+</svg>

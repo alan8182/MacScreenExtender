@@ -9,7 +9,7 @@ import VirtualDisplayLib
 
 /// 双写日志（stdout + 文件），远程排障用：%APPDATA% 对应的 ~/Library/Application Support/MacScreenExtender/sender.log
 enum Log {
-    private static let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    static let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("MacScreenExtender/sender.log")
     private static let lock = NSLock()
 
@@ -95,7 +95,256 @@ final class App: @unchecked Sendable {
         lock.unlock()
         savePairStore()
         Log.write("🧹 配对已重置")
-        Log.write("配对已重置")
+    }
+
+    // MARK: - 屏幕排列记忆
+    private var layoutStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("MacScreenExtender/layout.json")
+
+    struct LayoutStore: Codable, Equatable {
+        var relativeX: Double
+        var relativeY: Double
+        var displayW: Int?
+        var displayH: Int?
+        var scalePercent: Int?
+    }
+
+    private var savedLayout: LayoutStore?
+    private(set) var userScalePercent: Int = 100
+    private var isConfiguringDisplay = false
+    private var lastConfiguredOrigin: CGPoint?
+
+    private func loadLayoutStore() {
+        guard let data = try? Data(contentsOf: layoutStoreURL),
+              let store = try? JSONDecoder().decode(LayoutStore.self, from: data) else { return }
+        lock.lock()
+        savedLayout = store
+        if let sp = store.scalePercent, [100, 125, 150, 175, 200].contains(sp) {
+            userScalePercent = sp
+        }
+        lock.unlock()
+        Log.write(String(format: "📐 加载屏幕记忆: 相对主屏 (%.0f, %.0f), 缩放 %d%%", store.relativeX, store.relativeY, userScalePercent))
+    }
+
+    private func saveLayoutStore(_ store: LayoutStore) {
+        lock.lock()
+        savedLayout = store
+        lock.unlock()
+        do {
+            try FileManager.default.createDirectory(at: layoutStoreURL.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try JSONEncoder().encode(store).write(to: layoutStoreURL)
+        } catch { print("屏幕记忆保存失败: \(error)") }
+    }
+
+    /// 切换 UI 缩放比例（100%、125%、150%、175%、200%），以超采样高清下采样直出
+    func setScalePercent(_ percent: Int) {
+        lock.lock()
+        guard userScalePercent != percent else { lock.unlock(); return }
+        userScalePercent = percent
+        if var store = savedLayout {
+            store.scalePercent = percent
+            savedLayout = store
+            lock.unlock()
+            saveLayoutStore(store)
+        } else {
+            let store = LayoutStore(relativeX: 0, relativeY: 0, displayW: displayW, displayH: displayH, scalePercent: percent)
+            savedLayout = store
+            lock.unlock()
+            saveLayoutStore(store)
+        }
+        Log.write("🔍 切换显示缩放: \(percent)%")
+        lock.lock()
+        let pw = displayW
+        let ph = displayH
+        let hiDPI = displayHiDPI
+        lock.unlock()
+        if pw > 0 && ph > 0 {
+            ensureConfig(w: pw, h: ph, hiDPI: hiDPI, scale: percent)
+        }
+    }
+
+    /// 重置屏幕排列为默认（清空记忆并复位至右侧居中）
+    func resetLayout() {
+        lock.lock()
+        savedLayout = nil
+        lastConfiguredOrigin = nil
+        lock.unlock()
+        try? FileManager.default.removeItem(at: layoutStoreURL)
+        Log.write("🧹 屏幕排列记忆已清除")
+        lock.lock()
+        let id = displayID
+        lock.unlock()
+        if id != 0 {
+            let mainID = getAnchorDisplayID(virtualID: id)
+            let mb = CGDisplayBounds(mainID)
+            let db = CGDisplayBounds(id)
+            let origin = Self.calculateOrigin(mainBounds: mb, virtualSize: db.size, saved: nil)
+            var config: CGDisplayConfigRef?
+            isConfiguringDisplay = true
+            defer { isConfiguringDisplay = false }
+            if CGBeginDisplayConfiguration(&config) == .success {
+                CGConfigureDisplayOrigin(config, id, Int32(origin.x), Int32(origin.y))
+                CGCompleteDisplayConfiguration(config, .permanently)
+                lastConfiguredOrigin = origin
+            }
+        }
+    }
+
+    private func getAnchorDisplayID(virtualID: CGDirectDisplayID) -> CGDirectDisplayID {
+        var mainID = CGMainDisplayID()
+        if mainID == virtualID, let builtin = Self.CGGetActiveDisplayList_safe().first(where: { CGDisplayIsBuiltin($0) != 0 }) {
+            mainID = builtin
+        }
+        return mainID
+    }
+
+    /// ponytail: 纯函数计算虚拟屏布局坐标。若记录了贴边特征则按边缘吸附自适应新分辨率，否则直取相对偏移；无记录回退右侧居中。
+    static func calculateOrigin(mainBounds mb: CGRect,
+                                virtualSize dbSize: CGSize,
+                                saved: LayoutStore?) -> CGPoint {
+        guard let saved else {
+            return CGPoint(x: mb.maxX, y: mb.midY - dbSize.height / 2)
+        }
+
+        var x = mb.origin.x + saved.relativeX
+        var y = mb.origin.y + saved.relativeY
+
+        // 若记录了旧尺寸，检查是否紧密贴靠在主屏边缘（容差 10 像素内），自适应新尺寸贴边避免产生空隙或重叠
+        if let oldW = saved.displayW, let oldH = saved.displayH {
+            let leftEdgeDist = abs((saved.relativeX + Double(oldW)) - 0)
+            let rightEdgeDist = abs(saved.relativeX - mb.width)
+            let topEdgeDist = abs((saved.relativeY + Double(oldH)) - 0)
+            let bottomEdgeDist = abs(saved.relativeY - mb.height)
+
+            if leftEdgeDist <= 10 {
+                x = mb.minX - dbSize.width
+            } else if rightEdgeDist <= 10 {
+                x = mb.maxX
+            }
+
+            if topEdgeDist <= 10 {
+                y = mb.minY - dbSize.height
+            } else if bottomEdgeDist <= 10 {
+                y = mb.maxY
+            }
+        }
+
+        // 防呆保护：如果计算出的坐标异常偏离（如插拔屏幕导致坐标漂移超过 20000 像素），安全回退默认位置
+        if abs(x - mb.origin.x) > 20000 || abs(y - mb.origin.y) > 20000 {
+            return CGPoint(x: mb.maxX, y: mb.midY - dbSize.height / 2)
+        }
+
+        return CGPoint(x: x, y: y)
+    }
+
+    private func saveCurrentLayout() {
+        guard !isConfiguringDisplay else { return }
+        lock.lock()
+        let id = displayID
+        let lastOrigin = lastConfiguredOrigin
+        lock.unlock()
+        guard id != 0 else { return }
+
+        // 检查虚拟屏是否仍然活跃在系统列表中
+        guard Self.CGGetActiveDisplayList_safe().contains(id) else { return }
+        let mainID = getAnchorDisplayID(virtualID: id)
+        guard mainID != id else { return }
+
+        let mb = CGDisplayBounds(mainID)
+        let db = CGDisplayBounds(id)
+        guard db.width > 0 && db.height > 0 && mb.width > 0 && mb.height > 0 else { return }
+
+        // 避免刚配置生效时的回执通知重复处理
+        if let last = lastOrigin, abs(db.origin.x - last.x) < 1 && abs(db.origin.y - last.y) < 1 {
+            return
+        }
+
+        let logW = Int(db.width)
+        let logH = Int(db.height)
+
+        let relX = db.origin.x - mb.origin.x
+        let relY = db.origin.y - mb.origin.y
+
+        lock.lock()
+        let old = savedLayout
+        lock.unlock()
+
+        if old == nil || abs(old!.relativeX - relX) >= 1 || abs(old!.relativeY - relY) >= 1 || old!.displayW != logW || old!.displayH != logH || old!.scalePercent != userScalePercent {
+            let newStore = LayoutStore(relativeX: relX, relativeY: relY, displayW: logW, displayH: logH, scalePercent: userScalePercent)
+            saveLayoutStore(newStore)
+            lastConfiguredOrigin = db.origin
+            Log.write(String(format: "📐 已记住显示器排列: 相对主屏 (%.0f, %.0f) [逻辑 %dx%d, 缩放 %d%%]", relX, relY, logW, logH, userScalePercent))
+        }
+    }
+
+    /// ponytail: 启动自检，确保布局计算逻辑符合预期
+    static func selfCheckLayout() {
+        let mb = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let vs = CGSize(width: 1920, height: 1080)
+
+        // 1. 无记录回退
+        let def = calculateOrigin(mainBounds: mb, virtualSize: vs, saved: nil)
+        assert(def.x == 1920 && def.y == 0, "Default layout calculation failed")
+
+        // 2. 左侧吸附
+        let leftSaved = LayoutStore(relativeX: -1920, relativeY: 0, displayW: 1920, displayH: 1080)
+        let leftRes = calculateOrigin(mainBounds: mb, virtualSize: CGSize(width: 2560, height: 1440), saved: leftSaved)
+        assert(leftRes.x == -2560, "Left docking adaptation failed")
+
+        // 3. 右侧吸附
+        let rightSaved = LayoutStore(relativeX: 1920, relativeY: 0, displayW: 1920, displayH: 1080)
+        let rightRes = calculateOrigin(mainBounds: mb, virtualSize: CGSize(width: 2560, height: 1440), saved: rightSaved)
+        assert(rightRes.x == 1920, "Right docking adaptation failed")
+
+        // 4. 自定义相对偏移
+        let customSaved = LayoutStore(relativeX: -500, relativeY: 200, displayW: nil, displayH: nil)
+        let customRes = calculateOrigin(mainBounds: mb, virtualSize: vs, saved: customSaved)
+        assert(customRes.x == -500 && customRes.y == 200, "Custom relative layout failed")
+    }
+
+    /// ponytail: 纯函数计算显示器渲染参数（逻辑排版尺寸、视网膜像素尺寸与开启标志）
+    static func calculateDisplayDimensions(physicalW: Int, physicalH: Int, scalePercent: Int)
+        -> (logicalW: Int, logicalH: Int, backingW: Int, backingH: Int, useHiDPI: Bool, ppi: Int) {
+        let safeScale = max(100, min(300, scalePercent))
+        if safeScale == 100 {
+            return (physicalW, physicalH, physicalW, physicalH, false, 102)
+        }
+        let scale = Double(safeScale) / 100.0
+        var logW = Int(round(Double(physicalW) / scale))
+        var logH = Int(round(Double(physicalH) / scale))
+        if (logW & 1) != 0 { logW -= 1 }
+        if (logH & 1) != 0 { logH -= 1 }
+        logW = max(640, logW)
+        logH = max(480, logH)
+
+        // 视网膜 2x 超采样渲染尺寸 (pixel backing store)
+        let backW = logW * 2
+        let backH = logH * 2
+        return (logW, logH, backW, backH, true, 220)
+    }
+
+    /// ponytail: 自检显示缩放与超采样计算
+    static func selfCheckScalingCalculation() {
+        // 1080p 100%
+        let s100 = calculateDisplayDimensions(physicalW: 1920, physicalH: 1080, scalePercent: 100)
+        assert(s100.logicalW == 1920 && s100.logicalH == 1080 && !s100.useHiDPI, "100% scale failed")
+
+        // 1080p 125%
+        let s125 = calculateDisplayDimensions(physicalW: 1920, physicalH: 1080, scalePercent: 125)
+        assert(s125.logicalW == 1536 && s125.logicalH == 864 && s125.backingW == 3072 && s125.useHiDPI && s125.ppi == 220, "125% scale failed")
+
+        // 1080p 150%
+        let s150 = calculateDisplayDimensions(physicalW: 1920, physicalH: 1080, scalePercent: 150)
+        assert(s150.logicalW == 1280 && s150.logicalH == 720 && s150.backingW == 2560 && s150.useHiDPI && s150.ppi == 220, "150% scale failed")
+
+        // 2K 1440p 150%
+        let s2k = calculateDisplayDimensions(physicalW: 2560, physicalH: 1440, scalePercent: 150)
+        assert(s2k.logicalW == 1706 && s2k.logicalH == 960 && s2k.backingW == 3412 && s2k.useHiDPI, "2K 150% scale failed")
+
+        // 2.5K 1600p 150% (用户实机)
+        let s1600 = calculateDisplayDimensions(physicalW: 2560, physicalH: 1600, scalePercent: 150)
+        assert(s1600.logicalW == 1706 && s1600.logicalH == 1066 && s1600.backingW == 3412 && s1600.useHiDPI, "1600p 150% scale failed")
     }
 
     /// 首次配对：凭 4 位码换长期 token
@@ -171,6 +420,8 @@ final class App: @unchecked Sendable {
     private var displayID: CGDirectDisplayID = 0
     private var displayW = 0
     private var displayH = 0
+    private var displayHiDPI = false
+    private var displayScale = 100
     private var capture: CaptureService?
     private var encoder: VideoEncoder?
     private lazy var muxer = TSMuxer(streamType: hevc ? 0x24 : 0x1B)
@@ -247,9 +498,20 @@ final class App: @unchecked Sendable {
         }
 
         loadPairStore()
+        loadLayoutStore()
+        Self.selfCheckLayout()
+        Self.selfCheckScalingCalculation()
         startDiscovery()
         controlServer.isAuthorized = { [weak self] ip in
             self?.authorize(ip: ip, token: nil) ?? false
+        }
+        controlServer.onRequestKeyframe = { [weak self] in
+            self?.encoder?.requestKeyframe()
+        }
+
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.saveCurrentLayout()
         }
 
         ensureConfig(w: defaultWidth, h: defaultHeight)
@@ -260,21 +522,42 @@ final class App: @unchecked Sendable {
 
     // MARK: - 菜单栏
 
+    var clientCount: Int {
+        broadcaster.count + rawBroadcaster.count
+    }
+
+    var currentResolution: (w: Int, h: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (displayW, displayH)
+    }
+
+    var currentBitrateMbps: Int {
+        adaptiveBitrate / 1_000_000
+    }
+
     func statusLine() -> String {
-        lock.lock(); let w = displayW, h = displayH; lock.unlock()
-        let clients = broadcaster.count + rawBroadcaster.count
+        let (w, h) = currentResolution
+        let clients = clientCount
+        let scaleText = userScalePercent > 100 ? " [缩放 \(userScalePercent)%]" : ""
         let state = paused ? "⏸ 已暂停"
             : (w == 0 ? "启动中…"
-            : String(format: "虚拟屏 %d×%d@%dfps", w, h, fps))
+            : String(format: "虚拟屏 %d×%d%@@%dfps", w, h, scaleText, fps))
         return String(format: "%@ · 客户端 %d · 码率 %dMbps · %@",
-                      state, clients, adaptiveBitrate / 1_000_000, hevc ? "HEVC" : "H.264")
+                      state, clients, currentBitrateMbps, hevc ? "HEVC" : "H.264")
     }
 
     private func setupMenuBar() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)   // 无 Dock 图标，纯菜单栏
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "🖥"
+        if let button = item.button {
+            if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "display.2", accessibilityDescription: "MacScreenSender") {
+                img.isTemplate = true
+                button.image = img
+            } else {
+                button.title = "🖥"
+            }
+        }
         let menu = NSMenu()
         menu.autoenablesItems = false
         let coordinator = MenuCoordinator(app: self)
@@ -415,18 +698,27 @@ final class App: @unchecked Sendable {
             return
         }
 
-        // 分辨率参数：Windows 客户端用自己屏幕的尺寸请求，Mac 侧重建对应虚拟屏
+        // 分辨率与缩放参数：Windows 客户端传物理尺寸与缩放需求
         var w = defaultWidth, h = defaultHeight
-        if let v = params["w"], let x = Int(v), x >= 640, x <= 7680 { w = x }
-        if let v = params["h"], let x = Int(v), x >= 480, x <= 4320 { h = x }
+        if let v = params["pw"] ?? params["outw"] ?? params["w"], let x = Int(v), x >= 640, x <= 7680 { w = x }
+        if let v = params["ph"] ?? params["outh"] ?? params["h"], let x = Int(v), x >= 480, x <= 4320 { h = x }
+        let hiDPI = (params["hidpi"] == "1" || params["retina"] == "1")
+
+        var reqScale: Int? = nil
+        if let v = params["scale"], let s = Int(v), s >= 100 && s <= 300 {
+            reqScale = s
+            self.lock.lock()
+            self.userScalePercent = s
+            self.lock.unlock()
+        }
 
         // 先完成（可能的）重建，再发响应头/入组/关键帧。否则客户端会先收到旧分辨率的流，
         // 再遭遇 mid-stream SPS 变更——部分解码器会冻结在旧帧上
         configQueue.async { [weak self] in
             guard let self else { return }
-            self.ensureConfigSync(w: w, h: h)
+            self.ensureConfigSync(w: w, h: h, hiDPI: hiDPI, scale: reqScale)
             if isRaw {
-                HTTPServer.sendStreamHead(conn, contentType: "video/h264")
+                HTTPServer.sendStreamHead(conn, contentType: self.hevc ? "video/hevc" : "video/h264")
                 self.rawBroadcaster.add(conn)
             } else {
                 HTTPServer.sendStreamHead(conn)
@@ -434,21 +726,23 @@ final class App: @unchecked Sendable {
                 self.broadcaster.send(to: conn, self.muxer.systemTables())
             }
             self.encoder?.requestKeyframe()   // 新客户端立即出关键帧
-            print("客户端接入: \(conn.endpoint) → \(w)x\(h)\(isRaw ? " [raw]" : "")（当前 \(self.broadcaster.count+self.rawBroadcaster.count) 个）")
+            let scaleInfo = self.userScalePercent > 100 ? " [缩放 \(self.userScalePercent)%]" : ""
+            print("客户端接入: \(conn.endpoint) → \(w)x\(h)\(scaleInfo)\(hiDPI ? " [HiDPI]" : "")\(isRaw ? " [raw]" : "")（当前 \(self.broadcaster.count+self.rawBroadcaster.count) 个）")
         }
     }
 
     // MARK: - 配置（虚拟屏 + 采集 + 编码）
 
-    private func ensureConfig(w: Int, h: Int) {
+    private func ensureConfig(w: Int, h: Int, hiDPI: Bool = false, scale: Int? = nil) {
         // 全部配置操作串行化，避免并发重建交错（旧屏销毁/新屏采集竞态）
-        configQueue.async { [weak self] in self?.ensureConfigSync(w: w, h: h) }
+        configQueue.async { [weak self] in self?.ensureConfigSync(w: w, h: h, hiDPI: hiDPI, scale: scale) }
     }
 
-    private func ensureConfigSync(w: Int, h: Int) {
+    private func ensureConfigSync(w: Int, h: Int, hiDPI: Bool = false, scale: Int? = nil) {
         guard !paused else { return }   // 用户已暂停投屏：不重建虚拟屏
+        let effScale = scale ?? userScalePercent
         lock.lock()
-        if w == displayW && h == displayH && displayID != 0 {
+        if w == displayW && h == displayH && hiDPI == displayHiDPI && effScale == displayScale && displayID != 0 {
             lock.unlock()
             return
         }
@@ -468,31 +762,50 @@ final class App: @unchecked Sendable {
             print("已销毁旧虚拟屏 \(displayW)x\(displayH)")
         }
 
-        print("创建虚拟屏 \(w)x\(h)...")
-        let newID = createVirtualDisplay(Int32(w), Int32(h), 102, false,
+        // 物理流输出尺寸（保证 Windows 接收端 1:1 点对点呈现，杜绝位图拉伸模糊）
+        let streamW = w
+        let streamH = h
+
+        // 视网膜超采样与逻辑排版尺寸
+        let dims = Self.calculateDisplayDimensions(physicalW: streamW, physicalH: streamH, scalePercent: effScale)
+        let useHiDPI = dims.useHiDPI || hiDPI
+        let ppi = dims.ppi
+
+        print("创建虚拟屏 逻辑\(dims.logicalW)x\(dims.logicalH), 像素\(dims.backingW)x\(dims.backingH) (缩放 \(effScale)%, 输出流 \(streamW)x\(streamH), HiDPI=\(useHiDPI), PPI=\(ppi))...")
+        let newID = createVirtualDisplay(Int32(dims.logicalW), Int32(dims.logicalH),
+                                         Int32(dims.backingW), Int32(dims.backingH),
+                                         Int32(ppi), useHiDPI,
                                          "MacScreenExtender",
-                                         Self.stableSerial("windows-receiver"), Int32(fps))
+                                         Self.stableSerial("windows-receiver-\(effScale)"), Int32(fps))
         guard newID != 0 else {
             Log.write("❌ 虚拟屏创建失败")
             return
         }
         lock.lock()
         displayID = newID
-        displayW = w
-        displayH = h
+        displayW = streamW
+        displayH = streamH
+        displayHiDPI = hiDPI
+        displayScale = effScale
         lock.unlock()
 
-        // 显式固定到主屏正右侧、垂直居中（macOS 对新屏的自动摆放不稳定）
-        var mainID = CGMainDisplayID()
-        if mainID == newID, let builtin = Self.CGGetActiveDisplayList_safe().first(where: { CGDisplayIsBuiltin($0) != 0 }) {
-            mainID = builtin
-        }
+        // ponytail: 读取已保存的相对排列；无记录时回退默认（主屏正右侧垂直居中）
+        let mainID = getAnchorDisplayID(virtualID: newID)
         let mb = CGDisplayBounds(mainID)
+        let db = CGDisplayBounds(newID)
+        lock.lock()
+        let saved = savedLayout
+        lock.unlock()
+        let origin = Self.calculateOrigin(mainBounds: mb, virtualSize: db.size, saved: saved)
+
+        isConfiguringDisplay = true
         var config: CGDisplayConfigRef?
         if CGBeginDisplayConfiguration(&config) == .success {
-            CGConfigureDisplayOrigin(config, newID, Int32(mb.maxX), Int32(mb.midY - CGFloat(h) / 2))
+            CGConfigureDisplayOrigin(config, newID, Int32(origin.x), Int32(origin.y))
             CGCompleteDisplayConfiguration(config, .permanently)
+            lastConfiguredOrigin = origin
         }
+        isConfiguringDisplay = false
 
         // WindowServer 注册新屏有延迟，枚举到再继续
         guard Self.waitForDisplay(newID, timeout: 3.0) else {
@@ -507,7 +820,7 @@ final class App: @unchecked Sendable {
             let cap = CaptureService()
             let enc = VideoEncoder()
             do {
-                try enc.start(width: w, height: h, fps: fps, bitrateBps: adaptiveBitrate,
+                try enc.start(width: streamW, height: streamH, fps: fps, bitrateBps: adaptiveBitrate,
                               codec: hevc ? .hevc : .h264)
             } catch {
                 print("❌ 编码器启动失败: \(error)")
@@ -518,17 +831,11 @@ final class App: @unchecked Sendable {
                 guard let self else { return false }
                 return self.broadcaster.count + self.rawBroadcaster.count > 0
             }
-            // 控制客户端在线 → 光标由客户端本地绘制（0ms 感知）；离线 → 回退画进视频
-            // 光标所有权：Windows 注入活跃 → 系统光标承担（0ms）；静默/未控制 → Mac 指针入画
-        cap.shouldStampCursor = { [weak self] in
-            guard let self else { return false }
-            return self.controlServer.msSinceLastInject > 250
-        }
-        // 合成帧只做保活（光标已走控制通道）：有客户端 10fps，无客户端 5fps
-        cap.tickRate = { [weak self] in
-            guard let self else { return 0.2 }
-            return self.controlServer.hasClients ? 0.1 : 0.2
-        }
+            // 合成帧只做保活：有客户端 10fps，无客户端 5fps
+            cap.tickRate = { [weak self] in
+                guard let self else { return 0.2 }
+                return self.controlServer.hasClients ? 0.1 : 0.2
+            }
             cap.displayID = newID   // 光标叠加换算用（每帧实时读 bounds）
             enc.onFrame = { [weak self] annexB, keyframe, pts90 in
                 guard let self else { return }
@@ -542,7 +849,7 @@ final class App: @unchecked Sendable {
             let sem = DispatchSemaphore(value: 0)
             var startError: Error?
             Task {
-                do { try await cap.start(displayID: newID, width: w, height: h, fps: fps) }
+                do { try await cap.start(displayID: newID, width: streamW, height: streamH, fps: fps) }
                 catch { startError = error }
                 sem.signal()
             }
@@ -560,7 +867,7 @@ final class App: @unchecked Sendable {
             capture = cap
             encoder = enc
             lock.unlock()
-            Log.write("✅ 采集+编码已就绪 displayID=\(newID)（\(w)x\(h)）")
+            Log.write("✅ 采集+编码已就绪 displayID=\(newID)（物理 \(streamW)x\(streamH)，逻辑 \(dims.logicalW)x\(dims.logicalH)，像素 \(dims.backingW)x\(dims.backingH)，缩放 \(effScale)%\(useHiDPI ? " [Retina 2x]" : "")）")
             return
         }
     }
@@ -671,27 +978,77 @@ final class MenuCoordinator: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         guard let app else { return }
 
-        let status = NSMenuItem(title: app.statusLine(), action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        menu.addItem(status)
-        for ip in App.localIPs() {
-            let item = NSMenuItem(title: "http://\(ip):\(app.port)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
+        let clients = app.clientCount
+        let res = app.currentResolution
+        let paused = app.paused
+
+        // 1. 状态指示区（带原生指示小圆点与清晰信息）
+        let statusTitle: String
+        let subtitle: String?
+        if paused {
+            statusTitle = "⏸  投屏已暂停"
+            subtitle = "点击下方「恢复投屏」继续"
+        } else if clients > 0 {
+            statusTitle = "🟢  正在扩展 · \(clients) 台设备已连接"
+            subtitle = "\(res.w)×\(res.h) · \(app.fps)fps · \(app.currentBitrateMbps)Mbps \(app.hevc ? "HEVC" : "H.264")"
+        } else {
+            statusTitle = "🟡  等待连接 · 待机中"
+            subtitle = res.w > 0 ? "虚拟屏 \(res.w)×\(res.h) 就绪" : "正在初始化虚拟屏…"
         }
 
-        let pc = NSMenuItem(title: "配对码 \(app.pairingCode)（终身不变）", action: nil, keyEquivalent: "")
-        pc.isEnabled = false
-        menu.addItem(pc)
-        let reset = NSMenuItem(title: "重置配对（清空已配对设备）", action: #selector(resetPairing), keyEquivalent: "")
-        reset.target = self
-        menu.addItem(reset)
+        let statusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
+        statusItem.isEnabled = false
+        menu.addItem(statusItem)
+
+        if let sub = subtitle {
+            let subItem = NSMenuItem(title: "    " + sub, action: nil, keyEquivalent: "")
+            subItem.isEnabled = false
+            menu.addItem(subItem)
+        }
 
         menu.addItem(.separator())
-        let pause = NSMenuItem(title: app.paused ? "▶️ 恢复投屏" : "⏸ 暂停投屏",
+
+        // 2. 核心配对与连接区（可直接点击复制到剪贴板）
+        let pairItem = NSMenuItem(title: "配对码: \(app.pairingCode)  (点击复制)", action: #selector(copyPairingCode), keyEquivalent: "")
+        pairItem.target = self
+        menu.addItem(pairItem)
+
+        let ips = App.localIPs()
+        if let primaryIP = ips.first {
+            let addrItem = NSMenuItem(title: "本机地址: \(primaryIP):\(app.port)  (点击复制)", action: #selector(copyAddress), keyEquivalent: "")
+            addrItem.target = self
+            menu.addItem(addrItem)
+        }
+
+        menu.addItem(.separator())
+
+        // 3. 常用控制区
+        let pause = NSMenuItem(title: paused ? "恢复投屏" : "暂停投屏",
                                action: #selector(togglePause), keyEquivalent: "")
         pause.target = self
         menu.addItem(pause)
+
+        // 缩放控制：Mac 侧直接切换视网膜超采样比例
+        let scaleItem = NSMenuItem(title: "显示缩放（文字大小）", action: nil, keyEquivalent: "")
+        let scaleSubMenu = NSMenu()
+        scaleSubMenu.autoenablesItems = false
+        let currentScale = app.userScalePercent
+        let scales: [(Int, String)] = [
+            (100, "100% (点对点原生标准)"),
+            (125, "125% (清晰大字 · 视网膜超采样)"),
+            (150, "150% (舒适大字 · 视网膜超采样 · 推荐)"),
+            (175, "175% (特大字号 · 视网膜超采样)"),
+            (200, "200% (视网膜 2x · 超大)")
+        ]
+        for (sc, label) in scales {
+            let item = NSMenuItem(title: label, action: #selector(changeScale(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = sc
+            item.state = (currentScale == sc) ? .on : .off
+            scaleSubMenu.addItem(item)
+        }
+        scaleItem.submenu = scaleSubMenu
+        menu.addItem(scaleItem)
 
         if #available(macOS 13.0, *) {
             let auto = NSMenuItem(title: "开机自启", action: #selector(toggleAutostart), keyEquivalent: "")
@@ -701,13 +1058,85 @@ final class MenuCoordinator: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "q")
+
+        // 4. 高级选项（收纳低频/排障功能）
+        let advancedItem = NSMenuItem(title: "高级选项", action: nil, keyEquivalent: "")
+        let advMenu = NSMenu()
+        advMenu.autoenablesItems = false
+
+        let reset = NSMenuItem(title: "重置配对授权（清空已配对设备）", action: #selector(resetPairing), keyEquivalent: "")
+        reset.target = self
+        advMenu.addItem(reset)
+
+        let resetLayoutItem = NSMenuItem(title: "重置屏幕排列（恢复默认右侧居中）", action: #selector(resetLayout), keyEquivalent: "")
+        resetLayoutItem.target = self
+        advMenu.addItem(resetLayoutItem)
+
+        advMenu.addItem(.separator())
+
+        let showLog = NSMenuItem(title: "在访达中查看运行日志...", action: #selector(showLogInFinder), keyEquivalent: "")
+        showLog.target = self
+        advMenu.addItem(showLog)
+
+        if ips.count > 1 {
+            advMenu.addItem(.separator())
+            let otherIPsHeader = NSMenuItem(title: "所有可用网络地址 (点击复制):", action: nil, keyEquivalent: "")
+            otherIPsHeader.isEnabled = false
+            advMenu.addItem(otherIPsHeader)
+            for ip in ips {
+                let item = NSMenuItem(title: "  http://\(ip):\(app.port)", action: #selector(copyArbitraryAddress(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = "http://\(ip):\(app.port)"
+                advMenu.addItem(item)
+            }
+        }
+
+        advancedItem.submenu = advMenu
+        menu.addItem(advancedItem)
+
+        menu.addItem(.separator())
+
+        // 5. 退出
+        let quit = NSMenuItem(title: "退出 MacScreenSender", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
 
+    @objc private func copyPairingCode() {
+        guard let app else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(app.pairingCode, forType: .string)
+        Log.write("📋 已复制配对码到剪贴板: \(app.pairingCode)")
+    }
+
+    @objc private func copyAddress() {
+        guard let app, let ip = App.localIPs().first else { return }
+        let url = "http://\(ip):\(app.port)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        Log.write("📋 已复制服务地址到剪贴板: \(url)")
+    }
+
+    @objc private func copyArbitraryAddress(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        Log.write("📋 已复制服务地址: \(url)")
+    }
+
+    @objc private func showLogInFinder() {
+        let url = Log.url
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url.deletingLastPathComponent())
+        }
+    }
+
     @objc private func togglePause() { app?.togglePause() }
     @objc private func resetPairing() { app?.resetPairing() }
+    @objc private func resetLayout() { app?.resetLayout() }
+    @objc private func changeScale(_ sender: NSMenuItem) { app?.setScalePercent(sender.tag) }
     @objc private func toggleAutostart() { app?.toggleAutostart() }
     @objc private func quit() { app?.shutdownAndExit() }
 }

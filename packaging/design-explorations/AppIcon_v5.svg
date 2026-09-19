@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 清新蔚蓝到生机薄荷的通透渐变底板 -->
+    <linearGradient id="tileBg" x1="0.1" y1="0.0" x2="0.9" y2="1.0">
+      <stop offset="0%" stop-color="#0071E3" />
+      <stop offset="40%" stop-color="#0A84FF" />
+      <stop offset="75%" stop-color="#00C7BE" />
+      <stop offset="100%" stop-color="#30D158" />
+    </linearGradient>
+
+    <!-- 顶部高光弧罩 -->
+    <linearGradient id="topSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 图标边缘微米级高光描边 -->
+    <linearGradient id="rimBorder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.15" />
+    </linearGradient>
+
+    <!-- 屏幕全景渐变壁纸：从深邃夜空蓝到晨曦清泉绿 -->
+    <linearGradient id="screenBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#091E3A" />
+      <stop offset="50%" stop-color="#0F4C81" />
+      <stop offset="100%" stop-color="#056654" />
+    </linearGradient>
+
+    <!-- 灵动流光光弧 -->
+    <linearGradient id="glowFlow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#70EE9C" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#00BBF9" stop-opacity="0.8" />
+    </linearGradient>
+
+    <!-- 玻璃反光 -->
+    <linearGradient id="glassReflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4" />
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 大底板立体柔和投影 -->
+    <filter id="tileShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="32" stdDeviation="36" flood-color="#011e38" flood-opacity="0.30" />
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#011e38" flood-opacity="0.15" />
+    </filter>
+
+    <!-- 主屏悬浮阴影 -->
+    <filter id="macShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#001e38" flood-opacity="0.35" />
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#001e38" flood-opacity="0.18" />
+    </filter>
+
+    <!-- 副屏悬浮阴影 -->
+    <filter id="extShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#001a33" flood-opacity="0.40" />
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#001a33" flood-opacity="0.22" />
+    </filter>
+
+    <filter id="softHalo" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="20" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle 底板 -->
+  <g filter="url(#tileShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#tileBg)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#rimBorder)" stroke-width="2.5" />
+    <path d="M 285,101 L 739,101 C 820,101 880,140 900,220 C 700,260 324,260 124,220 C 144,140 204,101 285,101 Z" fill="url(#topSheen)" />
+  </g>
+
+  <!-- 2. 背景中的环境高光光斑 -->
+  <circle cx="360" cy="440" r="160" fill="#60A5FA" opacity="0.22" filter="url(#softHalo)" />
+  <circle cx="660" cy="540" r="160" fill="#34D399" opacity="0.25" filter="url(#softHalo)" />
+
+  <!-- 3. 左侧主屏幕（Mac 屏幕）: 纯净悬浮显示板，无笨重支架，更纯粹现代 -->
+  <g filter="url(#macShadow)">
+    <!-- 纯白一体陶瓷外框 -->
+    <rect x="200" y="290" width="430" height="290" rx="26" fill="#FFFFFF" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="212" y="302" width="406" height="266" rx="16" fill="#0A192F" />
+    <!-- 屏幕主壁纸 -->
+    <rect x="214" y="304" width="402" height="262" rx="14" fill="url(#screenBg)" />
+
+    <!-- 极简轻盈流光 -->
+    <path d="M214,460 C290,400 420,510 616,390 L616,566 L214,566 Z" fill="url(#glowFlow)" opacity="0.45" />
+    <path d="M214,500 C310,450 450,530 616,440 L616,566 L214,566 Z" fill="#00F5D4" opacity="0.35" />
+
+    <!-- 玻璃高光反光 -->
+    <path d="M214,304 L420,304 L214,510 Z" fill="url(#glassReflect)" />
+
+    <!-- Mac 顶部视网膜摄像头微点 -->
+    <circle cx="415" cy="296" r="2.5" fill="#CBD5E1" />
+  </g>
+
+  <!-- 4. 右侧拓展副屏（Companion Display）: 紧凑错落叠加，高亮生机薄荷 -->
+  <g filter="url(#extShadow)">
+    <!-- 纯白一体外框 -->
+    <rect x="410" y="390" width="414" height="280" rx="24" fill="#FFFFFF" stroke="#BAE6FD" stroke-width="2" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="422" y="402" width="390" height="256" rx="15" fill="#052E26" />
+    <!-- 屏幕主壁纸 -->
+    <rect x="424" y="404" width="386" height="252" rx="13" fill="url(#screenBg)" />
+
+    <!-- 极简轻盈流光（接力流动） -->
+    <path d="M424,530 C500,460 630,590 810,470 L810,656 L424,656 Z" fill="url(#glowFlow)" opacity="0.6" />
+    <path d="M424,570 C530,510 660,610 810,520 L810,656 L424,656 Z" fill="#70EE9C" opacity="0.4" />
+
+    <!-- 玻璃高光反光 -->
+    <path d="M424,404 L620,404 L424,600 Z" fill="url(#glassReflect)" />
+
+    <!-- 状态指示绿宝石点 -->
+    <circle cx="785" cy="430" r="5" fill="#FFFFFF" />
+    <circle cx="785" cy="430" r="3.5" fill="#00F5D4" />
+  </g>
+
+  <!-- 5. 极速无线随航核心徽记：两屏交汇处的三道轻盈优雅白光弧 -->
+  <g>
+    <!-- 无线连接脉冲光波 -->
+    <path d="M 400,475 A 32,32 0 0,1 400,535" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.95" />
+    <path d="M 400,475 A 32,32 0 0,1 400,535" fill="none" stroke="#00F5D4" stroke-width="3" stroke-linecap="round" />
+
+    <path d="M 380,458 A 52,52 0 0,1 380,552" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity="0.8" />
+    <path d="M 380,458 A 52,52 0 0,1 380,552" fill="none" stroke="#70EE9C" stroke-width="2" stroke-linecap="round" opacity="0.8" />
+
+    <!-- 中心能量光核 -->
+    <circle cx="415" cy="505" r="6" fill="#FFFFFF" />
+    <circle cx="415" cy="505" r="4" fill="#00F5D4" />
+  </g>
+</svg>

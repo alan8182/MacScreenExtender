@@ -4,14 +4,20 @@
 // displayID -> CGVirtualDisplay 持有表。ARC 持有对象，释放即销毁显示器。
 static NSMutableDictionary<NSNumber *, CGVirtualDisplay *> *gLiveDisplays = nil;
 
-uint32_t createVirtualDisplay(int32_t width, int32_t height, int32_t ppi, bool hiDPI,
+uint32_t createVirtualDisplay(int32_t logicalWidth, int32_t logicalHeight,
+                              int32_t backingWidth, int32_t backingHeight,
+                              int32_t ppi, bool hiDPI,
                               NSString * _Nullable name, uint32_t serialNum, int32_t refreshRate) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ gLiveDisplays = [NSMutableDictionary dictionary]; });
 
-    // 实测语义：mode = 像素尺寸（backing），hiDPI=1 表示 2x UI → 逻辑分辨率 = mode/2。
-    // （此前按"mode=逻辑尺寸"减半传入，结果 hiDPI 不生效，退回 1x 渲染）
-    int modeW = width, modeH = height;
+    // 实测验证：
+    // - mode = 逻辑排版点阵 (point，决定系统 UI 布局与字体大小)
+    // - descriptor.maxPixelsWide / maxPixelsHigh = 物理像素缓冲区 (pixel backing store)
+    // - 当 hiDPI=1 且 backing 像素为 logical 的 2 倍时，macOS 启用真实 2x Retina 视网膜矢量排版渲染
+    // - ppi 需要设置足够高（如 220），macOS 判定为 HiDPI 高密度显示器，不强制退回 1x
+    int modeW = logicalWidth, modeH = logicalHeight;
+    int backW = backingWidth, backH = backingHeight;
 
     CGVirtualDisplaySettings *settings = [[CGVirtualDisplaySettings alloc] init];
     settings.hiDPI = hiDPI ? 1 : 0;
@@ -26,9 +32,9 @@ uint32_t createVirtualDisplay(int32_t width, int32_t height, int32_t ppi, bool h
     descriptor.redPrimary = CGPointMake(0.6797, 0.3203);
     descriptor.greenPrimary = CGPointMake(0.2559, 0.6983);
     descriptor.bluePrimary = CGPointMake(0.1494, 0.0557);
-    descriptor.maxPixelsWide = (unsigned int)width;
-    descriptor.maxPixelsHigh = (unsigned int)height;
-    descriptor.sizeInMillimeters = CGSizeMake(25.4 * width / ppi, 25.4 * height / ppi);
+    descriptor.maxPixelsWide = (unsigned int)backW;
+    descriptor.maxPixelsHigh = (unsigned int)backH;
+    descriptor.sizeInMillimeters = CGSizeMake(25.4 * backW / ppi, 25.4 * backH / ppi);
     descriptor.vendorID = 1;
 
     // serial 冲突时递增重试；连续失败再换随机序列号兜底

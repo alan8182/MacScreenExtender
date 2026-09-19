@@ -21,13 +21,20 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp .build/release/MacScreenSender "$APP/Contents/MacOS/MacScreenSender"
 cp packaging/Info.plist "$APP/Contents/Info.plist"
+if [ -f packaging/AppIcon.icns ]; then
+    mkdir -p "$APP/Contents/Resources"
+    cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
-# 默认用 Apple Development 证书：签名身份稳定，重新打包不丢 TCC 权限。
-# 无参数时自动选择；传 "-" 强制 ad-hoc；传证书名覆盖默认
-SIGN_ID="${1:-Apple Development: Yunfei Yang (55832U3GFU)}"
-if [ "$SIGN_ID" = "-" ]; then
+# 优先使用传入参数，未传入时自动探测本地签名证书（Apple Development / Developer ID），若无则使用 ad-hoc
+SIGN_ID="${1:-}"
+if [ -z "$SIGN_ID" ]; then
+    SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -E "Developer ID Application|Apple Development" | head -n 1 | sed -E 's/.*"(.*)"/\1/' || true)
+fi
+
+if [ -z "$SIGN_ID" ] || [ "$SIGN_ID" = "-" ]; then
     codesign --force -s - "$APP"
-    echo "⚠️  ad-hoc 签名：重新打包后需重新授权"
+    echo "⚠️  ad-hoc 签名（本地未检测到开发者证书）：重新打包后需在系统设置中重新授权 TCC 权限"
 else
     codesign --force -s "$SIGN_ID" "$APP"
     echo "🔑 已用证书 [$SIGN_ID] 签名"

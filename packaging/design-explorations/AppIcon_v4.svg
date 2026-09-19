@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 极简清新：清透海洋天青到晨曦薄荷绿 -->
+    <linearGradient id="tileBg" x1="0.1" y1="0.0" x2="0.9" y2="1.0">
+      <stop offset="0%" stop-color="#0066FF" />
+      <stop offset="42%" stop-color="#00A3FF" />
+      <stop offset="78%" stop-color="#00D4B2" />
+      <stop offset="100%" stop-color="#10E79D" />
+    </linearGradient>
+
+    <!-- 顶部微光斜照罩 -->
+    <linearGradient id="specularLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.38" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 图标边缘微米级高光描边 -->
+    <linearGradient id="rimBorder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.12" />
+    </linearGradient>
+
+    <!-- 两屏连贯全景流光壁纸：从左侧深空蔚蓝，无缝流淌延伸至右侧青草翡翠 -->
+    <linearGradient id="panoramicWallpaper" x1="0.0" y1="0.2" x2="1.0" y2="0.8">
+      <stop offset="0%" stop-color="#0B1329" />
+      <stop offset="25%" stop-color="#0052CC" />
+      <stop offset="50%" stop-color="#0099FF" />
+      <stop offset="75%" stop-color="#00C9A7" />
+      <stop offset="100%" stop-color="#00B887" />
+    </linearGradient>
+
+    <!-- 灵动连贯流线渐变 -->
+    <linearGradient id="waveFlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#38EF7D" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#11998E" stop-opacity="0.7" />
+    </linearGradient>
+
+    <!-- 玻璃斜切反光 -->
+    <linearGradient id="glassSheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.38" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 大底板柔和 Apple 立体光影 -->
+    <filter id="tileShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="32" stdDeviation="36" flood-color="#011e38" flood-opacity="0.30" />
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#011e38" flood-opacity="0.15" />
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#011e38" flood-opacity="0.10" />
+    </filter>
+
+    <!-- 主屏悬浮阴影 -->
+    <filter id="macShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#00203f" flood-opacity="0.32" />
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#00203f" flood-opacity="0.18" />
+    </filter>
+
+    <!-- 副屏浮层阴影 -->
+    <filter id="extShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#001a33" flood-opacity="0.38" />
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#001a33" flood-opacity="0.20" />
+    </filter>
+
+    <!-- 柔光晕 -->
+    <filter id="haloGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle 底板 -->
+  <g filter="url(#tileShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#tileBg)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#rimBorder)" stroke-width="2.5" />
+    <path d="M 285,101 L 739,101 C 820,101 880,140 900,220 C 700,260 324,260 124,220 C 144,140 204,101 285,101 Z" fill="url(#specularLight)" />
+  </g>
+
+  <!-- 2. 背景中的环境漫反射光晕（呼应双屏） -->
+  <circle cx="380" cy="440" r="140" fill="#60A5FA" opacity="0.25" filter="url(#haloGlow)" />
+  <circle cx="640" cy="520" r="140" fill="#34D399" opacity="0.25" filter="url(#haloGlow)" />
+
+  <!-- 3. 左侧主显示屏（Mac Pro Display）: 居中偏左，纯白无瑕外框 -->
+  <g filter="url(#macShadow)">
+    <!-- 极简流线底座 -->
+    <path d="M 385,550 L 425,550 L 418,620 L 392,620 Z" fill="#E2E8F0" opacity="0.95" />
+    <rect x="345" y="616" width="120" height="10" rx="5" fill="#FFFFFF" />
+
+    <!-- 纯白一体式外框 -->
+    <rect x="210" y="290" width="400" height="265" rx="22" fill="#FFFFFF" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="222" y="302" width="376" height="241" rx="13" fill="#0F172A" />
+    <!-- 屏幕主视觉画面：全景桌面左半部 -->
+    <rect x="224" y="304" width="372" height="237" rx="11" fill="url(#panoramicWallpaper)" />
+
+    <!-- 左屏内部流线：优雅轻盈的流动海浪 -->
+    <path d="M224,440 C280,390 380,480 596,380 L596,541 L224,541 Z" fill="#0099FF" opacity="0.45" />
+    <path d="M224,480 C300,430 420,510 596,430 L596,541 L224,541 Z" fill="#00D4B2" opacity="0.35" />
+
+    <!-- 左屏玻璃高光 -->
+    <path d="M224,304 L400,304 L224,480 Z" fill="url(#glassSheen)" />
+  </g>
+
+  <!-- 4. 右侧拓展显示屏（Companion Display / iPad / 扩展副屏）: 叠置浮现在右前方 -->
+  <g filter="url(#extShadow)">
+    <!-- 纯白一体式外框 -->
+    <rect x="430" y="385" width="380" height="255" rx="22" fill="#FFFFFF" stroke="#E0F2FE" stroke-width="1.5" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="442" y="397" width="356" height="231" rx="13" fill="#064E3B" />
+    <!-- 屏幕主视觉画面：全景桌面右半部（视觉延伸） -->
+    <rect x="444" y="399" width="352" height="227" rx="11" fill="url(#panoramicWallpaper)" />
+
+    <!-- 右屏内部流线：与左屏完美连贯接力的海浪，象征同一个虚拟桌面的延伸！ -->
+    <path d="M444,460 C510,400 620,500 796,410 L796,626 L444,626 Z" fill="#00C9A7" opacity="0.5" />
+    <path d="M444,500 C530,450 640,530 796,460 L796,626 L444,626 Z" fill="#10E79D" opacity="0.4" />
+
+    <!-- 右屏玻璃高光 -->
+    <path d="M444,399 L610,399 L444,565 Z" fill="url(#glassSheen)" />
+
+    <!-- 右上角点对点满血绿色指示灯 -->
+    <circle cx="770" cy="422" r="5.5" fill="#FFFFFF" />
+    <circle cx="770" cy="422" r="4" fill="#10E79D" />
+  </g>
+
+  <!-- 5. 极简无线随航微波（纯白极简光环） -->
+  <g>
+    <!-- 无线信号波 1 -->
+    <path d="M 422,465 A 30,30 0 0,1 422,525" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" opacity="0.95" />
+    <path d="M 422,465 A 30,30 0 0,1 422,525" fill="none" stroke="#00E5FF" stroke-width="2.5" stroke-linecap="round" />
+
+    <!-- 无线信号波 2 -->
+    <path d="M 404,450 A 50,50 0 0,1 404,540" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity="0.8" />
+    <path d="M 404,450 A 50,50 0 0,1 404,540" fill="none" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" opacity="0.8" />
+
+    <!-- 核心光点 -->
+    <circle cx="436" cy="495" r="6" fill="#FFFFFF" />
+    <circle cx="436" cy="495" r="4" fill="#00E5FF" />
+  </g>
+</svg>

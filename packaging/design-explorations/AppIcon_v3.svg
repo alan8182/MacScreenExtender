@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 极简清新：纯净白玉/轻云冷白底板渐变 -->
+    <linearGradient id="canvasBg" x1="0.1" y1="0.0" x2="0.9" y2="1.0">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="60%" stop-color="#F8FAFC" />
+      <stop offset="100%" stop-color="#EDF4F9" />
+    </linearGradient>
+
+    <!-- 精致外框高光边 -->
+    <linearGradient id="canvasBorder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="50%" stop-color="#E2E8F0" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#CBD5E1" stop-opacity="0.6" />
+    </linearGradient>
+
+    <!-- 主屏：清澈深湛蓝到晴空青 -->
+    <linearGradient id="blueScreen" x1="0.1" y1="0.9" x2="0.9" y2="0.1">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="40%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+
+    <!-- 副屏：春草薄荷绿到青碧 -->
+    <linearGradient id="mintScreen" x1="0.1" y1="0.9" x2="0.9" y2="0.1">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="50%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <!-- 顶层透亮高光 -->
+    <linearGradient id="screenSheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4" />
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- 底部大悬浮阴影 -->
+    <filter id="appShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="30" stdDeviation="32" flood-color="#0f2b48" flood-opacity="0.14" />
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f2b48" flood-opacity="0.08" />
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f2b48" flood-opacity="0.05" />
+    </filter>
+
+    <!-- 双屏立体悬浮阴影 -->
+    <filter id="blueShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#0369a1" flood-opacity="0.28" />
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0369a1" flood-opacity="0.16" />
+    </filter>
+
+    <filter id="mintShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#065f46" flood-opacity="0.28" />
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#065f46" flood-opacity="0.18" />
+    </filter>
+
+    <filter id="centerGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="20" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- 1. 纯白极简 Squircle 底板 -->
+  <g filter="url(#appShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#canvasBg)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#canvasBorder)" stroke-width="2.5" />
+  </g>
+
+  <!-- 2. 背景微弱的环境光晕（增添通透与清新的灵动感） -->
+  <circle cx="360" cy="460" r="160" fill="#38BDF8" opacity="0.15" filter="url(#centerGlow)" />
+  <circle cx="660" cy="560" r="160" fill="#34D399" opacity="0.15" filter="url(#centerGlow)" />
+
+  <!-- 3. 左上主屏幕（Mac 屏幕）: 极简纯白外框 + 绚丽蔚蓝海天光感 -->
+  <g filter="url(#blueShadow)">
+    <!-- 极简立柱支架 -->
+    <path d="M 368,570 L 412,570 L 404,640 L 376,640 Z" fill="#E2E8F0" />
+    <rect x="330" y="636" width="120" height="10" rx="5" fill="#CBD5E1" />
+
+    <!-- 纯白亮面外框 -->
+    <rect x="190" y="290" width="430" height="290" rx="26" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="204" y="304" width="402" height="262" rx="16" fill="#0F172A" />
+    <!-- 湛蓝液晶屏 -->
+    <rect x="206" y="306" width="398" height="258" rx="14" fill="url(#blueScreen)" />
+
+    <!-- 极简柔和极光光弧 -->
+    <path d="M206,470 C290,410 430,530 604,420 L604,564 L206,564 Z" fill="#0284C7" opacity="0.5" />
+    <path d="M206,510 C320,460 460,540 604,475 L604,564 L206,564 Z" fill="#38BDF8" opacity="0.4" />
+
+    <!-- 屏幕玻璃反光 -->
+    <path d="M206,306 L410,306 L206,510 Z" fill="url(#screenSheen)" />
+  </g>
+
+  <!-- 4. 右下拓展屏幕（随航副屏）: 纯白亮面外框 + 清新春草薄荷绿 -->
+  <g filter="url(#mintShadow)">
+    <!-- 纯白外框 -->
+    <rect x="420" y="410" width="410" height="280" rx="24" fill="#FFFFFF" stroke="#D1FAE5" stroke-width="2" />
+    <!-- 屏幕黑边内圈 -->
+    <rect x="434" y="424" width="382" height="252" rx="15" fill="#064E3B" />
+    <!-- 翠绿液晶屏 -->
+    <rect x="436" y="426" width="378" height="248" rx="13" fill="url(#mintScreen)" />
+
+    <!-- 极简柔和极光光弧 -->
+    <path d="M436,565 C520,505 640,620 814,525 L814,674 L436,674 Z" fill="#059669" opacity="0.5" />
+    <path d="M436,605 C540,560 670,630 814,580 L814,674 L436,674 Z" fill="#34D399" opacity="0.4" />
+
+    <!-- 屏幕玻璃反光 -->
+    <path d="M436,426 L630,426 L436,620 Z" fill="url(#screenSheen)" />
+
+    <!-- 状态指示点 -->
+    <circle cx="784" cy="454" r="6" fill="#FFFFFF" />
+    <circle cx="784" cy="454" r="4.5" fill="#10B981" />
+  </g>
+
+  <!-- 5. 极简无线随航波纹（纯白圆润光弧） -->
+  <g>
+    <path d="M 405,485 A 32,32 0 0,1 405,545" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" />
+    <path d="M 405,485 A 32,32 0 0,1 405,545" fill="none" stroke="#38BDF8" stroke-width="3.5" stroke-linecap="round" />
+
+    <path d="M 385,470 A 52,52 0 0,1 385,560" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" opacity="0.85" />
+    <path d="M 385,470 A 52,52 0 0,1 385,560" fill="none" stroke="#2DD4BF" stroke-width="3" stroke-linecap="round" opacity="0.85" />
+
+    <path d="M 365,455 A 72,72 0 0,1 365,575" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity="0.6" />
+    <path d="M 365,455 A 72,72 0 0,1 365,575" fill="none" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" opacity="0.6" />
+
+    <circle cx="425" cy="515" r="7" fill="#FFFFFF" />
+    <circle cx="425" cy="515" r="4.5" fill="#00E5FF" />
+  </g>
+</svg>

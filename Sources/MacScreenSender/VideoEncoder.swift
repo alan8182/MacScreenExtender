@@ -57,6 +57,9 @@ final class VideoEncoder: @unchecked Sendable {
         setProperty(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, 2.0 as NSNumber)
         setProperty(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse)
         setProperty(kVTCompressionPropertyKey_MaxFrameDelayCount, 0 as NSNumber)   // 零缓冲：编码完立刻吐
+        setProperty(kVTCompressionPropertyKey_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_709_2)
+        setProperty(kVTCompressionPropertyKey_TransferFunction, kCVImageBufferTransferFunction_ITU_R_709_2)
+        setProperty(kVTCompressionPropertyKey_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_709_2)
         if !isHEVC {
             setProperty(kVTCompressionPropertyKey_H264EntropyMode, kVTH264EntropyMode_CABAC)
         }

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 背景：纯净温润的冰川白与柔和晨曦蓝白渐变 -->
+    <linearGradient id="bgWhite" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="45%" stop-color="#F6F9FD" />
+      <stop offset="100%" stop-color="#EAF2FA" />
+    </linearGradient>
+
+    <!-- 顶部极细微米反光 -->
+    <linearGradient id="whiteRim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1" />
+      <stop offset="100%" stop-color="#D1DFEE" stop-opacity="0.6" />
+    </linearGradient>
+
+    <!-- 底板柔和阴影 -->
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#3b597d" flood-opacity="0.14" />
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#3b597d" flood-opacity="0.08" />
+    </filter>
+
+    <!-- 主屏渐变 (蔚蓝晴空) -->
+    <linearGradient id="blueScreen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A84FF" />
+      <stop offset="100%" stop-color="#0062D2" />
+    </linearGradient>
+
+    <!-- 拓展屏渐变 (翡翠生机薄荷) -->
+    <linearGradient id="mintScreen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00D2A0" />
+      <stop offset="100%" stop-color="#009688" />
+    </linearGradient>
+
+    <filter id="screenShadow1" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="18" flood-color="#0a467e" flood-opacity="0.25" />
+    </filter>
+
+    <filter id="screenShadow2" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="26" stdDeviation="22" flood-color="#004d40" flood-opacity="0.30" />
+    </filter>
+
+    <!-- 屏幕高光玻璃扫光 -->
+    <linearGradient id="sheenPass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 弥散柔光圈 -->
+    <radialGradient id="auraGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00B4D8" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#00B4D8" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- 1. Squircle 外框 (极简冷白玉) -->
+  <g filter="url(#tileShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bgWhite)" />
+    <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#whiteRim)" stroke-width="2" />
+  </g>
+
+  <!-- 环境柔光 -->
+  <circle cx="512" cy="512" r="350" fill="url(#auraGlow)" />
+
+  <!-- 2. 后层：主机屏幕 (Mac 晴空蓝) -->
+  <g filter="url(#screenShadow1)">
+    <!-- 铝金属外边线 -->
+    <rect x="220" y="270" width="430" height="290" rx="28" fill="#FFFFFF" />
+    <!-- 屏幕彩面 -->
+    <rect x="232" y="282" width="406" height="266" rx="18" fill="url(#blueScreen)" />
+    <!-- 屏幕高光 -->
+    <path d="M 232,282 L 460,282 L 232,510 Z" fill="url(#sheenPass)" />
+    
+    <!-- 极简主屏桌面线条 (视网膜呼吸山脉微曲线) -->
+    <path d="M 232,460 Q 340,390 460,450 T 638,420 L 638,548 L 232,548 Z" fill="#FFFFFF" opacity="0.18" />
+  </g>
+
+  <!-- 3. 前层：扩展副屏 (生机薄荷绿) 错位悬浮 -->
+  <g filter="url(#screenShadow2)">
+    <!-- 铝金属外边线 -->
+    <rect x="380" y="420" width="430" height="290" rx="28" fill="#FFFFFF" />
+    <!-- 屏幕彩面 -->
+    <rect x="392" y="432" width="406" height="266" rx="18" fill="url(#mintScreen)" />
+    <!-- 屏幕高光 -->
+    <path d="M 392,432 L 620,432 L 392,660 Z" fill="url(#sheenPass)" />
+
+    <!-- 延展的山脉微曲线 (与主屏无缝相连) -->
+    <path d="M 392,600 Q 500,530 620,590 T 798,560 L 798,698 L 392,698 Z" fill="#FFFFFF" opacity="0.22" />
+  </g>
+
+  <!-- 4. 双屏随航无线连接波纹 (位于两屏相交黄金分割点) -->
+  <g>
+    <!-- 无线脉冲光环 -->
+    <circle cx="380" cy="420" r="32" fill="#FFFFFF" filter="drop-shadow(0 6px 12px rgba(0,0,0,0.12))" />
+    <!-- 优雅随航发射弧线 -->
+    <path d="M 368,410 A 16,16 0 0,1 392,410" fill="none" stroke="#0080FF" stroke-width="4.5" stroke-linecap="round" />
+    <path d="M 362,402 A 25,25 0 0,1 398,402" fill="none" stroke="#00D2A0" stroke-width="4.5" stroke-linecap="round" />
+    <circle cx="380" cy="426" r="4.5" fill="#0077F5" />
+  </g>
+</svg>

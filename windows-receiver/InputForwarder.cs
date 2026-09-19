@@ -100,8 +100,8 @@ public sealed class InputForwarder : IDisposable
             if (down || up)
             {
                 var info = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
-                // Esc 留给本机（退出全屏）；Mac 侧需要 Esc 时先退全屏再按
-                if (info.vkCode == 0x1B) return NativeMethods.CallNextHookEx(_kbdHook, nCode, wParam, lParam);
+                // Esc (0x1B) 退全屏，F1 (0x70) 显隐连接信息，F11 (0x7A) 切换全屏，放行给本机
+                if (info.vkCode is 0x1B or 0x70 or 0x7A) return NativeMethods.CallNextHookEx(_kbdHook, nCode, wParam, lParam);
                 _queue.Enqueue(Key((ushort)info.vkCode, down));
                 return (IntPtr)1;   // 吞掉：Windows 不再响应（含 Alt+Tab/Win 键），全部交给 Mac
             }
