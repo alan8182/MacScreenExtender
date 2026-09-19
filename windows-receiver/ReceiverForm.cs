@@ -54,6 +54,7 @@ public class ReceiverForm : Form
     private ReceiverConfig _config = new();
     private IntPtr _oldImc = IntPtr.Zero;
     private int _inputLatencyMs = -1;   // 输入回路延迟 EWMA（-1 = 未知）
+    private DateTime _noFrameSince = DateTime.MinValue;   // 零画面持续起点（配对自愈用）
     private GpuVideoRenderer? _gpu;
 
     private static string ConfigDir =>
@@ -120,6 +121,30 @@ public class ReceiverForm : Form
                     _lastFrameStamp = DateTime.UtcNow;   // 防止连发
                     _status.Text = "画面停滞，重启解码…";
                     StartDecoder();
+                }
+                // 30 秒零画面 → 探测配对状态：Mac 端重置配对/换码后自动重新配对
+                if (fc == 0 && _started && !string.IsNullOrEmpty(_ip))
+                {
+                    if (_noFrameSince == DateTime.MinValue) _noFrameSince = DateTime.UtcNow;
+                    else if ((DateTime.UtcNow - _noFrameSince).TotalSeconds > 30)
+                    {
+                        _noFrameSince = DateTime.UtcNow;
+                        HttpGet(_ip, $"/pair-check?token={Uri.EscapeDataString(_config.Token)}", out int st);
+                        if (st == 403)
+                        {
+                            Log.Write("服务端 token 已失效，自动重新配对");
+                            _config.Token = "";
+                            SaveConfig();
+                            using var dlg = new PairDialog();
+                            if (dlg.ShowDialog(this) == DialogResult.OK)
+                            {
+                                var resp = HttpGet(_ip, $"/pair?code={Uri.EscapeDataString(dlg.Code)}", out int pst);
+                                if (pst == 200) { _config.Token = resp.Trim(); SaveConfig(); Log.Write("重新配对成功"); }
+                                else Log.Write($"重新配对失败（{pst}）");
+                            }
+                            StartDecoder();
+                        }
+                    }
                 }
             }
             else
@@ -282,6 +307,7 @@ public class ReceiverForm : Form
             _dec.CreateDecoderHwRef = _gpu.CreateDecoderHwRef;
         }
         _dec.FrameReady = OnFrameReady;   // 帧到即画（合并排队），消灭轮询节拍差
+        _noFrameSince = DateTime.MinValue;
         _dec.Start();
     }
 

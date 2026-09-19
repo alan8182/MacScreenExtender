@@ -7,6 +7,27 @@ import AppKit
 import ServiceManagement
 import VirtualDisplayLib
 
+/// 双写日志（stdout + 文件），远程排障用：%APPDATA% 对应的 ~/Library/Application Support/MacScreenExtender/sender.log
+enum Log {
+    private static let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("MacScreenExtender/sender.log")
+    private static let lock = NSLock()
+
+    static func write(_ msg: String) {
+        print(msg)
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            var data = (try? Data(contentsOf: url)) ?? Data()
+            if data.count > 512 * 1024 { data = Data() }
+            data.append(Data((msg + "\n").utf8))
+            try data.write(to: url)
+        } catch { }
+    }
+}
+
 enum AppError: Error {
     case capture(String)
     case display(String)
@@ -24,9 +45,10 @@ final class App: @unchecked Sendable {
     private var adaptiveBitrate: Int          // AIMD 当前目标码率（≤ bitrateBps）
     private var congestionTimer: DispatchSourceTimer?
     private var lastPrintedBitrate = 0
+    private var menuCoordinator: MenuCoordinator?   // NSMenu.delegate 是弱引用，必须强持有
 
     // MARK: 配对与发现
-    let pairingCode = String(format: "%04d", Int.random(in: 1000...9999))
+    private(set) var pairingCode = ""
     private var pairedIPs: Set<String> = []
     private var pairedTokens: Set<String> = []
     private var discoveryTimer: DispatchSourceTimer?
@@ -34,29 +56,46 @@ final class App: @unchecked Sendable {
         .appendingPathComponent("MacScreenExtender/paired.json")
 
     private struct PairStore: Codable {
+        var code: String? = nil   // 旧版文件无此字段：解码失败才生成新码，避免清空已有配对
         var ips: [String] = []
         var tokens: [String] = []
     }
 
+    /// 配对码持久化：生成一次终身不变（变化的码只会让两端配对状态混乱）
     private func loadPairStore() {
-        guard let data = try? Data(contentsOf: pairStoreURL),
-              let store = try? JSONDecoder().decode(PairStore.self, from: data) else { return }
+        var store = (try? JSONDecoder().decode(PairStore.self, from: Data(contentsOf: pairStoreURL) ?? Data())) ?? nil
+        if store == nil { store = PairStore() }
+        if store!.code == nil || store!.code!.count != 4 {
+            store!.code = String(format: "%04d", Int.random(in: 1000...9999))
+        }
+        pairingCode = store!.code!
         lock.lock()
-        pairedIPs = Set(store.ips)
-        pairedTokens = Set(store.tokens)
+        pairedIPs = Set(store!.ips)
+        pairedTokens = Set(store!.tokens)
         lock.unlock()
-        print("🔑 已配对设备 \(store.ips.count) 台")
+        if let data = try? JSONEncoder().encode(store!) { try? data.write(to: pairStoreURL) }
+        Log.write("🔑 配对码: \(pairingCode)（已配对设备 \(store!.ips.count) 台）")
     }
 
     private func savePairStore() {
         lock.lock()
-        let store = PairStore(ips: Array(pairedIPs), tokens: Array(pairedTokens))
+        let store = PairStore(code: pairingCode, ips: Array(pairedIPs), tokens: Array(pairedTokens))
         lock.unlock()
         do {
             try FileManager.default.createDirectory(at: pairStoreURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             try JSONEncoder().encode(store).write(to: pairStoreURL)
         } catch { print("配对信息保存失败: \(error)") }
+    }
+
+    /// 清空已配对设备（码不变）；Windows 端旧 token 全部失效，重新配对即可
+    func resetPairing() {
+        lock.lock()
+        pairedIPs.removeAll(); pairedTokens.removeAll()
+        lock.unlock()
+        savePairStore()
+        Log.write("🧹 配对已重置")
+        Log.write("配对已重置")
     }
 
     /// 首次配对：凭 4 位码换长期 token
@@ -185,7 +224,7 @@ final class App: @unchecked Sendable {
             try server.start(port: port)
             try controlServer.start(port: port &+ 1)   // 控制通道
         } catch {
-            print("❌ 服务启动失败: \(error)")
+            Log.write("❌ 服务启动失败: \(error)")
             exit(1)
         }
         startCongestionControl()
@@ -238,7 +277,10 @@ final class App: @unchecked Sendable {
         item.button?.title = "🖥"
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.delegate = MenuCoordinator(app: self)
+        let coordinator = MenuCoordinator(app: self)
+        menuCoordinator = coordinator   // 强持有：否则委托被释放，菜单永远是空的
+        menu.delegate = coordinator
+        coordinator.rebuild(menu)       // 预填一次，委托时序问题也不至于空菜单
         item.menu = menu
         if headless {
             // SSH/脚本场景：无菜单栏，保持旧行为
@@ -348,10 +390,10 @@ final class App: @unchecked Sendable {
         // 配对引导（免鉴权）：凭菜单栏 4 位码换长期 token
         if path == "/pair" {
             if let token = pairWith(code: params["code"] ?? "", ip: peer) {
-                print("🔑 设备 \(peer) 配对成功")
+                Log.write("🔑 设备 \(peer) 配对成功")
                 HTTPServer.sendText(conn, token)
             } else {
-                print("🚫 设备 \(peer) 配对码错误")
+                Log.write("🚫 设备 \(peer) 配对码错误")
                 HTTPServer.sendText(conn, "ERR 配对码不正确", status: 403)
             }
             return
@@ -364,7 +406,7 @@ final class App: @unchecked Sendable {
 
         // 鉴权闸门：token 或已配对 IP
         guard authorize(ip: peer, token: params["token"]) else {
-            print("🚫 未配对设备 \(peer) 请求 \(path) 已拒绝")
+            Log.write("🚫 未配对设备 \(peer) 请求 \(path) 已拒绝")
             HTTPServer.sendText(conn, "NEED-PAIR", status: 403)
             return
         }
@@ -431,7 +473,7 @@ final class App: @unchecked Sendable {
                                          "MacScreenExtender",
                                          Self.stableSerial("windows-receiver"), Int32(fps))
         guard newID != 0 else {
-            print("❌ 虚拟屏创建失败")
+            Log.write("❌ 虚拟屏创建失败")
             return
         }
         lock.lock()
@@ -501,7 +543,7 @@ final class App: @unchecked Sendable {
                 sem.signal()
             }
             if sem.wait(timeout: .now() + 8) == .timedOut {
-                print("❌ 采集启动超时(8s)\(attempt < 2 ? "，清理后重试" : "，重试仍失败")")
+                Log.write("❌ 采集启动超时(8s)\(attempt < 2 ? "，清理后重试" : "，重试仍失败")")
                 cap.stop()
                 continue
             }
@@ -514,7 +556,7 @@ final class App: @unchecked Sendable {
             capture = cap
             encoder = enc
             lock.unlock()
-            print("✅ 采集+编码已就绪 displayID=\(newID)（\(w)x\(h)）")
+            Log.write("✅ 采集+编码已就绪 displayID=\(newID)（\(w)x\(h)）")
             return
         }
     }
@@ -615,7 +657,13 @@ final class MenuCoordinator: NSObject, NSMenuDelegate {
         super.init()
     }
 
+    func rebuild(_ menu: NSMenu) { fill(menu) }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
+        fill(menu)
+    }
+
+    private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
         guard let app else { return }
 
@@ -628,9 +676,12 @@ final class MenuCoordinator: NSObject, NSMenuDelegate {
             menu.addItem(item)
         }
 
-        let pc = NSMenuItem(title: "配对码 \(app.pairingCode)", action: nil, keyEquivalent: "")
+        let pc = NSMenuItem(title: "配对码 \(app.pairingCode)（终身不变）", action: nil, keyEquivalent: "")
         pc.isEnabled = false
         menu.addItem(pc)
+        let reset = NSMenuItem(title: "重置配对（清空已配对设备）", action: #selector(resetPairing), keyEquivalent: "")
+        reset.target = self
+        menu.addItem(reset)
 
         menu.addItem(.separator())
         let pause = NSMenuItem(title: app.paused ? "▶️ 恢复投屏" : "⏸ 暂停投屏",
@@ -652,6 +703,7 @@ final class MenuCoordinator: NSObject, NSMenuDelegate {
     }
 
     @objc private func togglePause() { app?.togglePause() }
+    @objc private func resetPairing() { app?.resetPairing() }
     @objc private func toggleAutostart() { app?.toggleAutostart() }
     @objc private func quit() { app?.shutdownAndExit() }
 }
