@@ -208,14 +208,12 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
                 if (!EnsureDevice()) { Thread.Sleep(100); continue; }
                 if (_resizePending) ApplyPendingResize();
 
-                AVFrame* f;
-                bool has;
-                lock (src.HwSync) { has = src.TryGetGpuFrameRaw(out f); }
-                if (!has) continue;
-
-                // 缩放合成：解码纹理 → 后备缓冲（等比黑边）
+                // 取帧 + 建视图 + Blt 同锁原子完成：保留帧的纹理归解码器池所有，
+                // 若中途换帧释放，池会回收复用该表面，Blt 会读到失效/被覆写的内容（黑屏）
                 lock (src.HwSync)
                 {
+                    if (!src.TryGetGpuFrameRaw(out var f)) continue;
+
                     var tex = new D3D11Texture2DT((nint)f->data[0]);
                     int slice = (int)(nint)f->data[1];
                     var inDesc = new VideoProcessorInputViewDescription
