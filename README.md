@@ -96,6 +96,10 @@ dotnet publish -c Release -r win-x64
 
 详见 [ARCHITECTURE.md](ARCHITECTURE.md)（数据流、线程模型、协议、设计决策与踩坑记录）。
 
+## 问题跟踪
+
+近期问题的状态/根因/验证方法详见 [ISSUES.md](ISSUES.md)。
+
 ## 已知限制
 
 - `Ctrl+Alt+Del` 为系统保留组合键，无法转发；`Esc` 保留给本机退全屏
