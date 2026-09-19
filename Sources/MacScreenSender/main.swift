@@ -519,7 +519,11 @@ final class App: @unchecked Sendable {
                 return self.broadcaster.count + self.rawBroadcaster.count > 0
             }
             // 控制客户端在线 → 光标由客户端本地绘制（0ms 感知）；离线 → 回退画进视频
-            cap.shouldStampCursor = { [weak self] in !(self?.controlServer.hasClients ?? false) }
+            // 光标所有权：Windows 注入活跃 → 系统光标承担（0ms）；静默/未控制 → Mac 指针入画
+        cap.shouldStampCursor = { [weak self] in
+            guard let self else { return false }
+            return self.controlServer.msSinceLastInject > 250
+        }
         // 合成帧只做保活（光标已走控制通道）：有客户端 10fps，无客户端 5fps
         cap.tickRate = { [weak self] in
             guard let self else { return 0.2 }

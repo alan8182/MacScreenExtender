@@ -121,7 +121,10 @@ public class ReceiverForm : Form
         _watchdog = new System.Windows.Forms.Timer { Interval = 1000 };
         _watchdog.Tick += (_, _) =>
         {
-            if (!_started || FormBorderStyle != FormBorderStyle.None) return;
+            if (!_started) return;
+            // 全屏触发：有解码帧且未全屏（UI 线程直接调用，不走 BeginInvoke 时序）
+            if (_dec is { FrameCount: > 0 } && !_autoFullscreenDone) EnsureFullscreen();
+            if (FormBorderStyle != FormBorderStyle.None) return;   // 以下逻辑仅全屏态需要
             if ((DateTime.UtcNow - _lastKeepalive).TotalSeconds > 6)
             {
                 _lastKeepalive = DateTime.UtcNow;   // 防止连发
@@ -329,17 +332,7 @@ public class ReceiverForm : Form
     private volatile bool _paintPending;
     private void OnFrameReady()
     {
-        // GPU 模式：画面由渲染线程直出，但全屏切换等 UI 事务仍需走 UI 线程
-        if (_dec is { IsGpuRendering: true })
-        {
-            if (!_autoFullscreenDone && !_paintPending && IsHandleCreated)
-            {
-                _paintPending = true;
-                try { BeginInvoke(new Action(() => { _paintPending = false; EnsureFullscreen(); })); }
-                catch { _paintPending = false; }
-            }
-            return;
-        }
+        if (_dec is { IsGpuRendering: true }) return;   // GPU：画面由渲染线程直出，全屏由看门狗接管
         if (_paintPending || !IsHandleCreated) return;
         _paintPending = true;
         try { BeginInvoke(new Action(() => { _paintPending = false; PaintTick(); })); }
@@ -351,6 +344,7 @@ public class ReceiverForm : Form
     {
         if (_autoFullscreenDone) return;
         _autoFullscreenDone = true;
+        Log.Write("进入全屏");
         _status.Text = "已连接";
         FormBorderStyle = FormBorderStyle.None;
         Bounds = Screen.FromControl(this).Bounds;

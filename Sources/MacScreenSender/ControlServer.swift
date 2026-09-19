@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import AppKit
 import QuartzCore
 
 /// 控制通道：TCP 8081，16 字节定长包
@@ -142,6 +143,10 @@ final class ControlServer: @unchecked Sendable {
     // RTT 统计（心跳回传测得）
     private let rttLock = NSLock()
     private var keepaliveSeq: UInt32 = 0
+    private var _lastInjectTime: Double = -100
+
+    /// 距最近一次 Windows 注入的毫秒数（光标所有权判定用）
+    var msSinceLastInject: Int64 { Int64((ProcessInfo.processInfo.systemUptime - _lastInjectTime) * 1000) }
     private var pendingSeqs: [UInt32: CFTimeInterval] = [:]
     private var rttEwmaMs: Double = 0
     private var rttMinMs: Double = 0
@@ -186,8 +191,10 @@ final class ControlServer: @unchecked Sendable {
         }
         switch type {
         case 1:
+            _lastInjectTime = ProcessInfo.processInfo.systemUptime
             injector.move(nx: f32(4), ny: f32(8))
         case 2, 3:
+            _lastInjectTime = ProcessInfo.processInfo.systemUptime
             injector.button(d[4], isDown: type == 2, nx: f32(4), ny: f32(8))
         case 4:
             injector.scroll(dx: f32(4), dy: f32(8))
