@@ -313,6 +313,8 @@ public class ReceiverForm : Form
         if (_gpu != null)
         {
             _dec.Renderer = _gpu;
+            // 设备提供者：渲染器从解码器取硬解设备指针（之前漏接导致 E_NOINTERFACE 死循环）
+            _gpu.DeviceProvider = () => _dec?.HwD3DDevice ?? IntPtr.Zero;
             // 光标本地渲染：Windows 鼠标实时位置（0ms），Mac 回报仅作非控制态兜底
             _gpu.LocalCursorProvider = () =>
             {
