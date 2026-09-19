@@ -18,6 +18,11 @@ internal static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+            Log.Write($"UI线程异常: {e.Exception.GetType().Name}: {e.Exception.Message}\n{e.Exception.StackTrace}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Log.Write($"⚠️ 未处理异常(进程退出): {e.ExceptionObject.GetType().Name}: {e.ExceptionObject}");
         Application.Run(new ReceiverForm());
     }
 }
@@ -50,6 +55,7 @@ public class ReceiverForm : Form
     private DateTime _mismatchSince = DateTime.MinValue;
     private int _mismatchAttempts;
     private ComboBox _discover;
+    private CheckBox _gpuCheck;   // GPU 渲染为实验特性，默认关闭（原生崩溃不可捕获，稳定后再默认开）
     private readonly System.Collections.Generic.List<Discovered> _discovered = new();
     private ReceiverConfig _config = new();
     private IntPtr _oldImc = IntPtr.Zero;
@@ -75,6 +81,8 @@ public class ReceiverForm : Form
         _status = new Label { Left = 20, Top = 125, Width = 430, AutoSize = true, ForeColor = Color.DimGray };
         var discLabel = new Label { Text = "发现:", Left = 20, Top = 78, AutoSize = true };
         _discover = new ComboBox { Left = 70, Top = 74, Width = 355, DropDownStyle = ComboBoxStyle.DropDownList };
+        _gpuCheck = new CheckBox { Text = "GPU 渲染（实验性，崩溃风险自担）", Left = 20, Top = 100, AutoSize = true, ForeColor = Color.DimGray };
+        _gpuCheck.CheckedChanged += (_, _) => { _config.Gpu = _gpuCheck.Checked; SaveConfig(); if (_started) StartDecoder(); };
         _discover.SelectedIndexChanged += (_, _) =>
         {
             if (_discover.SelectedItem is Discovered d) _ipBox.Text = d.Ip;
@@ -85,7 +93,7 @@ public class ReceiverForm : Form
             ForeColor = Color.DimGray,
             Text = "局域网内的 Mac 会自动出现在上面（需 Mac 端运行中）。\r\n首次连接输入 Mac 菜单栏显示的 4 位配对码。\r\n连接成功后进入全屏；全屏中按键直接控制 Mac，Esc 退出全屏。"
         };
-        Controls.AddRange(new Control[] { label, _ipBox, _goButton, discLabel, _discover, _status, hint });
+        Controls.AddRange(new Control[] { label, _ipBox, _goButton, discLabel, _discover, _gpuCheck, _status, hint });
 
         LoadConfig();
         StartDiscovery();
@@ -279,24 +287,31 @@ public class ReceiverForm : Form
         _dec?.Dispose();
         _dec = null;
         _gpu?.Dispose(); _gpu = null;
-        try
+        if (_gpuCheck.Checked)
         {
-            _gpu = new GpuVideoRenderer(Log.Write);
-            if (_gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height)))
+            try
             {
-                _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
-                Log.Write("GPU 渲染路径启用");
+                _gpu = new GpuVideoRenderer(Log.Write);
+                if (_gpu.Initialize(Handle, Math.Max(1, ClientRectangle.Width), Math.Max(1, ClientRectangle.Height)))
+                {
+                    _gpu.SetCursorSprite(_cursorSprite, CursorW, CursorH);
+                    Log.Write("GPU 渲染路径启用");
+                }
+                else
+                {
+                    _gpu.Dispose(); _gpu = null;
+                    Log.Write("GPU 初始化失败，使用 CPU 渲染路径");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _gpu.Dispose(); _gpu = null;
-                Log.Write("GPU 初始化失败，使用 CPU 渲染路径");
+                Log.Write($"GPU 初始化异常: {ex.Message}");
+                _gpu?.Dispose(); _gpu = null;
             }
         }
-        catch (Exception ex)
+        else
         {
-            Log.Write($"GPU 初始化异常: {ex.Message}");
-            _gpu?.Dispose(); _gpu = null;
+            Log.Write("使用 CPU 渲染路径（GPU 未勾选）");
         }
 
         _dec = new VideoDecoder(_url);
@@ -564,6 +579,7 @@ public class ReceiverForm : Form
     {
         public string Ip { get; set; } = "";
         public string Token { get; set; } = "";
+        public bool Gpu { get; set; }
     }
 
     internal sealed class PairDialog : Form
@@ -653,6 +669,7 @@ public class ReceiverForm : Form
         }
         catch { }
         _ipBox.Text = _config.Ip;
+        _gpuCheck.Checked = _config.Gpu;
     }
 
     void SaveConfig()

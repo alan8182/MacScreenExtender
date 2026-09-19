@@ -22,14 +22,19 @@ mkdir -p "$APP/Contents/MacOS"
 cp .build/release/MacScreenSender "$APP/Contents/MacOS/MacScreenSender"
 cp packaging/Info.plist "$APP/Contents/Info.plist"
 
-if [ $# -ge 1 ]; then
-    codesign --force -s "$1" "$APP"
-    echo "🔑 已用证书 [$1] 签名"
-else
+# 默认用 Apple Development 证书：签名身份稳定，重新打包不丢 TCC 权限。
+# 无参数时自动选择；传 "-" 强制 ad-hoc；传证书名覆盖默认
+SIGN_ID="${1:-Apple Development: Yunfei Yang (55832U3GFU)}"
+if [ "$SIGN_ID" = "-" ]; then
     codesign --force -s - "$APP"
-    echo "⚠️  ad-hoc 签名：重新打包后需重新授予屏幕录制/辅助功能权限"
-    echo "    （创建自签证书后执行 ./build-app.sh <证书名> 可一劳永逸）"
+    echo "⚠️  ad-hoc 签名：重新打包后需重新授权"
+else
+    codesign --force -s "$SIGN_ID" "$APP"
+    echo "🔑 已用证书 [$SIGN_ID] 签名"
 fi
 
-echo "✅ 已生成 $APP"
-echo "   双击运行（菜单栏出现 🖥 图标）；建议拖入 /Applications 后再开开机自启"
+# 自动安装到 /Applications（用户目录下的 App 容易被系统重置 TCC 授权）
+rm -rf "/Applications/MacScreenSender.app"
+cp -R "$APP" /Applications/
+echo "✅ 已安装到 /Applications/MacScreenSender.app"
+echo "   启动：启动台/Launchpad 或 open -a MacScreenSender"
