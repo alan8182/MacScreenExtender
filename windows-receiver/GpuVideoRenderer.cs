@@ -70,9 +70,12 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private volatile bool _composeRunning;
     /// 本地光标提供者（控制中返回 Windows 鼠标实时位置，0ms 延迟）
     public Func<(float nx, float ny, bool vis)?>? LocalCursorProvider;
+    /// 设备提供者：返回解码器硬解设备的 ID3D11Device 原生指针
+    public Func<IntPtr>? DeviceProvider;
     private Func<(float nx, float ny, bool vis)?>? _localProvider;
 
     private IntPtr _hwnd;
+    private nint _devicePtr;
     private int _swapW, _swapH;
     private int _spriteW, _spriteH;
     private (byte[] px, int w, int h)? _pendingCursor;
@@ -102,21 +105,29 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     }
 
     /// 从解码帧上采用设备（解码纹理属于它），并搭建整条渲染管线
-    private bool EnsureDevice(AVFrame* frame)
+    /// 从解码帧上采用设备（解码纹理属于它），并搭建整条渲染管线
+    private bool EnsureDevice()
     {
-        if (_device != null) return true;
+        nint devPtr = DeviceProvider?.Invoke() ?? IntPtr.Zero;
+        if (devPtr == IntPtr.Zero) { _log("GPU: 解码器无硬解设备"); return false; }
+        if (_device != null && _devicePtr == devPtr) return true;   // 已就绪
+        if (_device != null) TeardownDevice();                       // 解码器重建了设备 → 重建管线
+
         try
         {
-            using var tex = new D3D11Texture2DT((nint)frame->data[0]);
-            _device = tex.Device;
+            _devicePtr = devPtr;
+            // QI 产生渲染器自有的引用（解码器销毁设备时不会连带渲染器）
+            var raw = new D3D11DeviceT(devPtr);
+            _device = raw.QueryInterface<D3D11DeviceT>();
             _context = _device.ImmediateContext;
-            _log("GPU: 采用解码设备");
+            _log("GPU: 设备已采用");
 
             using var mt = _context.QueryInterface<ID3D11Multithread>();
             mt.SetMultithreadProtected(true);
 
             using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
-            using var factory = dxgiDevice.GetParent<IDXGIFactory2>();
+            using var factory = adapterGetParent(dxgiDevice);
+            _log("GPU: DXGI 工厂就绪");
 
             var scDesc = new SwapChainDescription1
             {
@@ -158,9 +169,36 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         catch (Exception ex)
         {
             _log($"GPU: 设备采用异常 {ex.GetType().Name}: {ex.Message}");
-            _device = null; _context = null;
+            TeardownDevice();
             return false;
         }
+    }
+
+    private static IDXGIFactory2 adapterGetParent(IDXGIDevice dxgiDevice)
+    {
+        using var adapter = dxgiDevice.GetAdapter();
+        return adapter.GetParent<IDXGIFactory2>();
+    }
+
+    private void TeardownDevice()
+    {
+        _outputView?.Dispose(); _outputView = null;
+        _rtv?.Dispose(); _rtv = null;
+        _d2dTarget?.Dispose(); _d2dTarget = null;
+        _d2dContext?.Dispose(); _d2dContext = null;
+        _d2dDevice?.Dispose(); _d2dDevice = null;
+        _d2dFactory?.Dispose(); _d2dFactory = null;
+        _processor?.Dispose(); _processor = null;
+        _procEnum?.Dispose(); _procEnum = null;
+        _videoDevice?.Dispose(); _videoDevice = null;
+        _videoContext?.Dispose(); _videoContext = null;
+        _swapChain?.Dispose(); _swapChain = null;
+        _videoTex?.Dispose(); _videoTex = null;
+        _videoRtv?.Dispose(); _videoRtv = null;
+        _backBuffer?.Dispose(); _backBuffer = null;
+        _context?.Dispose(); _context = null;
+        _device?.Dispose(); _device = null;
+        _devicePtr = IntPtr.Zero;
     }
 
     private D3D11ProcEnumT? CreateProcEnum(int w, int h)
@@ -216,7 +254,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     {
         try
         {
-            if (!EnsureDevice(frame)) return false;
+            if (!EnsureDevice()) return false;
             if (_resizePending) ApplyPendingResize();
             if (_srcW != frame->width || _srcH != frame->height)
             {

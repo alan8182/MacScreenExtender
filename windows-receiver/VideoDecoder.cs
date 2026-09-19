@@ -59,6 +59,19 @@ public sealed unsafe class VideoDecoder : IDisposable
     public bool IsGpuRendering => Renderer != null && !GpuFailed;
     private int _gpuFailCount;
 
+    /// 硬解设备的 ID3D11Device 原生指针（渲染器用它搭建同设备管线）
+    public IntPtr HwD3DDevice
+    {
+        get
+        {
+            if (_hwDev == default) return IntPtr.Zero;
+            var ctx = (AVHWDeviceContext*)_hwDev->data;
+            if (ctx->type != AVHWDeviceType.AV_HWDEVICE_TYPE_D3D11VA) return IntPtr.Zero;
+            var d3d = (AVD3D11VADeviceContext*)ctx->hwctx;
+            return (IntPtr)d3d->device;
+        }
+    }
+
     /// 光标精灵（BGRA 直通 alpha），解码后每帧混入
     public void SetCursorSprite(byte[] bgra, int w, int h)
     {
