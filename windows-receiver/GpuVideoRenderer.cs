@@ -60,6 +60,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private volatile bool _resizePending;
     private int _pendW, _pendH;
     private int _srcW = -1, _srcH = -1;
+    private bool _bltLogged, _cursorLogged;
 
     public GpuVideoRenderer(Action<string> log) { _log = log; }
 
@@ -73,14 +74,14 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
             _log($"GPU: 创建 D3D11 设备 ({_swapW}x{_swapH})");
             Result r = D3D11.D3D11CreateDevice((IDXGIAdapter?)null, DriverType.Hardware,
-                DeviceCreationFlags.BgraSupport,
+                DeviceCreationFlags.BgraSupport | DeviceCreationFlags.VideoSupport,
                 new FeatureLevelT[] { FeatureLevelT.Level_11_1, FeatureLevelT.Level_11_0 },
                 out D3D11DeviceT? device);
             if (r.Failure || device == null)
             {
                 _log($"GPU: 11.1/11.0 创建失败({r})，重试默认特性等级");
                 r = D3D11.D3D11CreateDevice((IDXGIAdapter?)null, DriverType.Hardware,
-                    DeviceCreationFlags.BgraSupport, null, out device);
+                    DeviceCreationFlags.BgraSupport | DeviceCreationFlags.VideoSupport, null, out device);
                 if (r.Failure || device == null)
                 {
                     _log($"GPU: 设备创建失败 {r}");
@@ -258,6 +259,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             };
             _videoContext.VideoProcessorSetStreamDestRect(_processor, 0u, true,
                 new RawRect(dx, dy, dx + dw, dy + dh));
+            if (!_bltLogged) { _bltLogged = true; _log("GPU: 首次 VideoProcessorBlt"); }
             _videoContext.VideoProcessorBlt(_processor, _outputView, 0u, new[] { stream });
 
             if (cursorVisible) DrawCursor(dx, dy, dw, dh, cursorNx, cursorNy);
@@ -279,6 +281,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         float scale = Math.Max(1.2f, dw / 1600f);
         float cx = dx + nx * dw, cy = dy + ny * dh;
         _d2dContext.Target = _d2dTarget;
+        if (!_cursorLogged) { _cursorLogged = true; _log("GPU: 首次 D2D 光标绘制"); }
         _d2dContext.BeginDraw();
         _d2dContext.DrawBitmap(_cursorD2d,
             new RawRectF(cx, cy, cx + _spriteW * scale, cy + _spriteH * scale),

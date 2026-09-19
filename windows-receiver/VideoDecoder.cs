@@ -140,9 +140,8 @@ public sealed unsafe class VideoDecoder : IDisposable
         if (codec == null) return false;
         _dec = ffmpeg.avcodec_alloc_context3(codec);
         if (ffmpeg.avcodec_parameters_to_context(_dec, par) < 0) return false;
-        // 帧级多线程会预缓冲多帧增加延迟：h264 单线程足够；
-        // HEVC 软解约 2-3 倍重。启用 d3d11va 硬解后多线程只作后备
-        _dec->thread_count = (par->codec_id == AVCodecID.AV_CODEC_ID_HEVC) ? 2 : 1;
+        // 帧级多线程会预缓冲多帧增加延迟；硬解不需要线程（也规避
+        // 帧线程+d3d11va+外部设备的崩溃组合）；软解 HEVC 用 2 线程换吞吐
 
         // d3d11va 硬解：解码（熵解码+帧重建，占 CPU 大头）交给显卡。
         // 优先用渲染器的设备（解码纹理与渲染同设备 → 帧可零拷贝上屏）；
@@ -192,9 +191,11 @@ public sealed unsafe class VideoDecoder : IDisposable
             // 硬解初始化失败：摘掉 hw_device_ctx 用软解重开一次
             ffmpeg.av_buffer_unref(&_dec->hw_device_ctx);
             _hwDisabled = true;
+            hwAttached = false;
             if (ffmpeg.avcodec_open2(_dec, codec, &dopts) < 0) return false;
         }
         else if (openRet < 0) return false;
+        if (hwAttached) _dec->thread_count = 1;   // 硬解路径：单线程（帧线程与 d3d11va 组合有崩溃风险）
 
         _frame = ffmpeg.av_frame_alloc();
         _swFrame = ffmpeg.av_frame_alloc();
