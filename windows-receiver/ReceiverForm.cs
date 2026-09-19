@@ -48,7 +48,6 @@ public class ReceiverForm : Form
     private string _ip;
     private System.Windows.Forms.Timer _watchdog;
     private System.Windows.Forms.Timer _paint;
-    private System.Windows.Forms.Timer _compose;
     private VideoDecoder _dec;
     private bool _autoFullscreenDone;   // 首帧后自动全屏只做一次，Esc 退出后不再抢
     private byte[] _cursorSprite;       // 本地光标精灵（混入解码帧缓冲，单次上屏无闪烁）
@@ -108,11 +107,6 @@ public class ReceiverForm : Form
 
         // 绘制：帧到即画（FrameReady 事件驱动）。定时器仅作兜底（窗口暴露/缩放后补绘），
         // 不能高频——它不看有没有新帧，高频会把静止画面反复 blit 白烧 GPU/内存
-        // GPU 合成循环 60Hz：光标与解码节拍解耦的关键
-        _compose = new System.Windows.Forms.Timer { Interval = 15 };
-        _compose.Tick += (_, _) => _gpu?.Compose();
-        _compose.Start();
-
         _paint = new System.Windows.Forms.Timer { Interval = 200 };
         _paint.Tick += (_, _) => PaintTick();
         _paint.Start();
@@ -316,7 +310,17 @@ public class ReceiverForm : Form
 
         _dec = new VideoDecoder(_url);
         _dec.SetCursorSprite(_cursorSprite, CursorW, CursorH);
-        if (_gpu != null) _dec.Renderer = _gpu;
+        if (_gpu != null)
+        {
+            _dec.Renderer = _gpu;
+            // 光标本地渲染：Windows 鼠标实时位置（0ms），Mac 回报仅作非控制态兜底
+            _gpu.LocalCursorProvider = () =>
+            {
+                if (_forwarder != null && ControlActive() && _forwarder.TryGetLocalCursor(out var lx, out var ly))
+                    return (lx, ly, true);
+                return null;
+            };
+        }
         _dec.FrameReady = OnFrameReady;   // 帧到即画（合并排队），消灭轮询节拍差
         _noFrameSince = DateTime.MinValue;
         _dec.Start();
@@ -687,7 +691,6 @@ public class ReceiverForm : Form
         _watchdog?.Stop();
         _forwarder?.Dispose();
         _retryTimer?.Stop();
-        _compose?.Stop();
         _dec?.Dispose();
         _gpu?.Dispose(); _gpu = null;
         base.OnFormClosed(e);

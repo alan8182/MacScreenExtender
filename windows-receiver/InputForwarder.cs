@@ -27,6 +27,17 @@ public sealed class InputForwarder : IDisposable
     readonly Thread _sender;
     private long _lastMoveSentTicks;   // 最后一次鼠标移动的发送时刻（输入延迟估算用）
 
+    // 本地光标位置（钩子频率更新）：绘制光标用，零往返延迟
+    private readonly object _localLock = new();
+    private float _localNx, _localNy;
+    private bool _localValid;
+
+    /// 本地鼠标位置（相对屏幕归一化）。仅在钩子活跃（控制中）时有效
+    public bool TryGetLocalCursor(out float nx, out float ny)
+    {
+        lock (_localLock) { nx = _localNx; ny = _localNy; return _localValid; }
+    }
+
     /// 最后一次移动的发送时刻（Ticks）；0 = 尚无移动
     public long LastMoveSentTicks => Interlocked.Read(ref _lastMoveSentTicks);
 
@@ -51,6 +62,7 @@ public sealed class InputForwarder : IDisposable
             {
                 case WM_MOUSEMOVE:
                     Interlocked.Exchange(ref _lastMoveSentTicks, DateTime.UtcNow.Ticks);
+                    lock (_localLock) { _localNx = nx; _localNy = ny; _localValid = true; }
                     Enqueue(Move(nx, ny));
                     return (IntPtr)1;
                 case WM_LBUTTONDOWN: Enqueue(Button(0, true, nx, ny)); return (IntPtr)1;

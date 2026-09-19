@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using FFmpeg.AutoGen;
 using SharpGen.Runtime;
 using Vortice;
@@ -59,10 +60,17 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
     private D3D11Texture2DT? _backBuffer;
     private int _lastDx, _lastDy, _lastDw = 1, _lastDh = 1;
 
-    // 光标最新状态（控制通道 60Hz 回报；合成循环读取）——与解码节拍解耦
+    // 光标状态（Mac 回报，作为本地位置不可用时的兜底）
     private readonly object _cursorLock = new();
     private float _curNx, _curNy;
     private bool _curVisible;
+
+    // 专用合成线程：Present(1) 自动锁定显示器刷新率（120Hz 屏 = 120 次合成/秒）
+    private Thread? _composeThread;
+    private volatile bool _composeRunning;
+    /// 本地光标提供者（控制中返回 Windows 鼠标实时位置，0ms 延迟）
+    public Func<(float nx, float ny, bool vis)?>? LocalCursorProvider;
+    private Func<(float nx, float ny, bool vis)?>? _localProvider;
 
     private IntPtr _hwnd;
     private int _swapW, _swapH;
@@ -135,6 +143,7 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             _d2dDevice = _d2dFactory.CreateDevice(dxgiDevice);
             _d2dContext = _d2dDevice.CreateDeviceContext(DeviceContextOptions.None);
             _log("GPU: 渲染管线全就绪");
+            StartComposeLoop();
             return true;
         }
         catch (Exception ex)
@@ -245,8 +254,24 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
         return new VideoProcessorStream { Enable = true, InputSurface = inView };
     }
 
-    /// 呈现循环（UI 线程 15ms）：视频纹理拷贝到后备缓冲 + 按最新光标位置叠画 + 垂直同步上屏。
-    /// 光标更新因此与解码节拍解耦——静止画面下光标依然 60Hz 丝滑
+    private void StartComposeLoop()
+    {
+        if (_composeThread != null) return;
+        _composeRunning = true;
+        _composeThread = new Thread(ComposeLoop) { IsBackground = true, Name = "gpu-compose" };
+        _composeThread.Start();
+    }
+
+    private void ComposeLoop()
+    {
+        while (_composeRunning)
+        {
+            Compose();
+            if (_videoTex == null) Thread.Sleep(10);   // 无画面：低速空转；有画面：Present(1) 自锁刷新率
+        }
+    }
+
+    /// 合成一帧：视频纹理 → 后备缓冲 → 光标（本地位置优先）→ 垂直同步上屏
     public void Compose()
     {
         try
@@ -255,7 +280,9 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
             _context.CopyResource(_backBuffer, _videoTex);
 
             float cnx, cny; bool cvis;
-            lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
+            var local = _localProvider?.Invoke();
+            if (local.HasValue) { cnx = local.Value.nx; cny = local.Value.ny; cvis = true; }
+            else lock (_cursorLock) { cnx = _curNx; cny = _curNy; cvis = _curVisible; }
             if (cvis) DrawCursor(_lastDx, _lastDy, _lastDw, _lastDh, cnx, cny);
 
             _swapChain.Present(1, PresentFlags.None);
@@ -362,6 +389,8 @@ public sealed unsafe class GpuVideoRenderer : IDisposable
 
     public void Dispose()
     {
+        _composeRunning = false;
+        try { _composeThread?.Join(1000); } catch { }
         _outputView?.Dispose();
         _rtv?.Dispose();
         _d2dTarget?.Dispose();
