@@ -1,5 +1,7 @@
 # MacScreenExtender — Mac ↔ Windows / iPad 高性能无线扩展屏
 
+简体中文 | [English](README.en.md)
+
 <p align="center">
   <b>把任意一台 Windows 电脑或 iPad 秒变 Mac 的超低延迟无线扩展屏</b><br>
   全 GPU 硬件加速编解码 · 60/120fps 自适应高刷 · 控制端光标 0ms 跟手 · 突破 Apple ID 限制 · 4K 高分屏自适应
