@@ -1,6 +1,7 @@
 import Foundation
 import CoreMedia
 import VideoToolbox
+import QuartzCore
 
 /// Annex-B H.264 / HEVC NALU 分包与参数集解析器
 public final class NALUParser {
