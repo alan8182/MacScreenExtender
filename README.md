@@ -39,6 +39,22 @@
 
 ---
 
+## 📥 下载安装
+
+**普通用户无需编译**，前往 [**Releases 页面**](https://github.com/alan8182/MacScreenExtender/releases) 下载对应平台的最新版：
+
+| 文件 | 平台 | 说明 |
+|---|---|---|
+| `MacScreenSender.dmg` | Mac（发送端） | 已签名 + 苹果官方公证，下载后双击安装，无安全阻拦 |
+| `MacScreenReceiver-win64.zip` | Windows（接收端） | 解压即用，无需安装；需预装 [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0) |
+| 源码 | iPad / Android（接收端） | 见 [`ipad-receiver/`](ipad-receiver/README.md) 与 [`android-receiver/`](android-receiver/README.md)，分别用 Xcode / Android Studio 构建安装 |
+
+> 💡 Windows 端首次运行若弹出 **SmartScreen「已保护你的电脑」**提示，属未签名程序的正常现象：点击 **「更多信息」→「仍要运行」** 即可。Windows 包内含 FFmpeg 运行时（LGPL，动态链接，未做修改）。
+>
+> 🛠️ 开发者可跳过下载，直接从源码构建，见下方「构建与发布」。
+
+---
+
 ## 🚀 快速上手
 
 ### 1. Mac 端（发送端）

@@ -1,0 +1,50 @@
+# Windows 接收端自动发布：推送 v* 标签时构建 win-x64 发布包并附加到 GitHub Release
+name: Build Windows Receiver
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 编译发布 win-x64
+        run: dotnet publish windows-receiver/MacScreenReceiver.csproj -c Release -r win-x64 -o publish
+
+      # FFmpeg.AutoGen 8.1.0 按 DLL 名加载 avcodec-62 等原生库，须使用 FFmpeg 8.x 共享版
+      - name: 下载 FFmpeg 8.1 共享运行时（LGPL）
+        run: |
+          curl.exe -L -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          Copy-Item ffmpeg/*/bin/*.dll publish/
+          Get-ChildItem ffmpeg -Recurse -Include LICENSE*,COPYING* -File |
+            Copy-Item -Destination publish -Force -ErrorAction SilentlyContinue
+
+      - name: 打包 zip
+        run: |
+          Remove-Item publish/*.pdb -ErrorAction SilentlyContinue
+          Compress-Archive -Path publish/* -DestinationPath MacScreenReceiver-win64.zip
+
+      - name: 上传构建产物（手动触发时在 Actions 页下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacScreenReceiver-win64
+          path: MacScreenReceiver-win64.zip
+
+      - name: 附加到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MacScreenReceiver-win64.zip
+          generate_release_notes: true
