@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mac 扩展屏</string>
+    <string name="notif_channel">投屏会话</string>
+    <string name="notif_title">扩展屏运行中</string>
+    <string name="notif_text">正在接收 Mac 扩展屏画面，触摸可控制 Mac</string>
+    <string name="notif_stop">停止投屏</string>
+</resources>

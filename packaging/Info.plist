@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Mac 扩展屏</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.ecarx.macscreensender</string>
+	<string>com.macscreextender.sender</string>
 	<key>CFBundleExecutable</key>
 	<string>MacScreenSender</string>
 	<key>CFBundlePackageType</key>

@@ -25,3 +25,14 @@ test.bmp
 .zcode/
 .idea/
 .vscode/
+
+# Android（android-receiver）
+android-receiver/.gradle/
+android-receiver/.kotlin/
+android-receiver/local.properties
+android-receiver/app/build/
+android-receiver/app/release/
+
+# 本地私有文件（含个人信息，不入库）
+软件著作权申请资料/
+使用说明.txt

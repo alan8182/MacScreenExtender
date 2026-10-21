@@ -34,6 +34,7 @@
 | **Mac (发送端)** | macOS 13.0 (Ventura) 及更高版本 | Apple Silicon (M1/M2/M3/M4 系列芯片) |
 | **Windows (接收端)** | Windows 10 / 11 64-bit | 支持 DirectX 11 显卡，.NET 8 Desktop Runtime |
 | **iPad (接收端)** | iPadOS 16.0 及更高版本 | 支持任意 iPad（支持不同 Apple ID / 老款 iPad） |
+| **Android 平板 (接收端)** | Android 9.0 及更高版本 | 2019 年后平板、支持 5GHz Wi-Fi（代码就绪待真机联调，见 [`android-receiver/`](android-receiver/README.md)） |
 | **网络环境** | 同一局域网内通信 | 建议 5GHz Wi-Fi、Wi-Fi 6 或千兆有线网络 |
 
 ---
