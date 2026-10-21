@@ -4,9 +4,10 @@ import AppKit
 import QuartzCore
 
 /// 控制通道：TCP 8081，16 字节定长包
-/// byte0 类型：1=move(nx f32@4, ny f32@8) 2=down(btn@4) 3=up(btn@4)
+/// byte0 类型：1=move(nx f32@4, ny f32@8) 2=down(btn@5) 3=up(btn@5)
 ///            4=wheel(dx f32@4, dy f32@8) 5=key(down@4, code u16@6)
 ///            7=心跳 8=光标回报(nx f32@4, ny f32@8, visible u8@12)（Mac→客户端）
+/// 注意：按钮码在 byte5——byte4 起 nx f32 会覆盖 byte4..7，按钮写 byte4 会被坐标吃掉
 final class ControlServer: @unchecked Sendable {
     private var listener: NWListener?
     private let injector: InputInjector
@@ -200,8 +201,9 @@ final class ControlServer: @unchecked Sendable {
             injector.move(nx: f32(4), ny: f32(8))
         case 2, 3:
             _lastInjectTime = ProcessInfo.processInfo.systemUptime
-            Log.write("🖱 点击 btn=\(d[4]) \(type == 2 ? "按下" : "抬起") @\(String(format: "%.2f", f32(4))), \(String(format: "%.2f", f32(8))))")
-            injector.button(d[4], isDown: type == 2, nx: f32(4), ny: f32(8))
+            let btn = d[5]   // byte5；byte4..7 是 nx 浮点，历史上写 byte4 会被 nx 覆盖（曾致 86% 点击变中键）
+            Log.write("🖱 点击 btn=\(btn) \(type == 2 ? "按下" : "抬起") @\(String(format: "%.2f", f32(4))), \(String(format: "%.2f", f32(8))))")
+            injector.button(btn, isDown: type == 2, nx: f32(4), ny: f32(8))
         case 4:
             injector.scroll(dx: f32(4), dy: f32(8))
         case 5:

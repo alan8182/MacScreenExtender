@@ -131,7 +131,8 @@ public sealed class InputForwarder : IDisposable
 
     // 16 字节定长包：type u8@0, 参数见协议
     public static byte[] Move(float nx, float ny) { var p = new byte[16]; p[0] = 1; Write(p, 4, nx); Write(p, 8, ny); return p; }
-    public static byte[] Button(byte b, bool down, float nx, float ny) { var p = new byte[16]; p[0] = (byte)(down ? 2 : 3); p[4] = b; Write(p, 4, nx); Write(p, 8, ny); return p; }
+    // 按钮码写 byte5：byte4..7 是 nx 浮点，写 byte4 会被坐标覆盖（曾致多数点击被 Mac 端当中键）
+    public static byte[] Button(byte b, bool down, float nx, float ny) { var p = new byte[16]; p[0] = (byte)(down ? 2 : 3); p[5] = b; Write(p, 4, nx); Write(p, 8, ny); return p; }
     public static byte[] Wheel(float dx, float dy) { var p = new byte[16]; p[0] = 4; Write(p, 4, dx); Write(p, 8, dy); return p; }
     public static byte[] Key(ushort code, bool down) { var p = new byte[16]; p[0] = 5; p[4] = (byte)(down ? 1 : 0); p[6] = (byte)(code & 0xFF); p[7] = (byte)(code >> 8); return p; }
 

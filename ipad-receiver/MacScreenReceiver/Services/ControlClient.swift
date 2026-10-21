@@ -58,12 +58,13 @@ public final class ControlClient: ObservableObject {
         sendPacket(p)
     }
 
-    /// 点击鼠标按键（btn: 0=左键, 1=右键）
+    /// 点击鼠标按键（btn: 0=左键, 1=右键）。按钮码写 byte5——byte4..7 是 nx 浮点，
+    /// 历史上写 byte4 会被坐标覆盖，导致多数点击被 Mac 端当中键
     public func sendButton(_ btn: UInt8, down: Bool, nx: Float, ny: Float) {
         var p = [UInt8](repeating: 0, count: 16)
         p[0] = down ? 2 : 3
-        p[4] = btn
-        writeFloat(nx, to: &p, offset: 4) // 协议兼容：同时在 4 写入坐标
+        p[5] = btn
+        writeFloat(nx, to: &p, offset: 4)
         writeFloat(ny, to: &p, offset: 8)
         sendPacket(p)
     }
