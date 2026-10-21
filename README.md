@@ -97,7 +97,7 @@
 # 执行完整签名、DMG 组装、苹果官方公证并自动装订票据
 ./release-mac.sh
 ```
-> 生成产物位于 `build/MacScreenSender.dmg`。
+> 发布产物位于 `build/MacScreenSender.dmg`。完整发版手册（版本号规范、公证配置、发布后验证）见 [RELEASE.md](RELEASE.md)。
 
 ### Windows 端构建
 
